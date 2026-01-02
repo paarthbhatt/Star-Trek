@@ -29,6 +29,8 @@ import { ShipComponent } from '@/types';
 import { CameraMode } from '@/hooks/useCameraMode';
 import { QualitySettings } from '@/hooks/useSettings';
 
+import { Bridge } from './bridge/Bridge';
+
 interface SceneProps {
   onSelectComponent: (component: ShipComponent) => void;
   hoveredComponent: ShipComponent | null;
@@ -42,6 +44,7 @@ interface SceneProps {
   flightEnabled?: boolean;
   cameraMode?: CameraMode;
   isOrbitEnabled?: boolean;
+  isBridgeMode?: boolean;
   selectedDestination?: Destination | null;
   warpLevel?: number;
   audioEnabled?: boolean;
@@ -625,6 +628,7 @@ function SceneContent({
   flightEnabled = true,
   cameraMode: cameraModeFromProps = 'flight',
   isOrbitEnabled = false,
+  isBridgeMode = false,
   selectedDestination,
   warpLevel = 1,
   audioEnabled = true,
@@ -845,171 +849,180 @@ function SceneContent({
 
   return (
     <>
-      {/* Camera */}
-      <PerspectiveCamera makeDefault position={[0, 1.2, 4.0]} fov={75} />
-      
-      {/* Warp Cinematic Camera - takes over during any warp phase */}
-      {isWarping && !isOrbitEnabled && (
-        <WarpCinematicCamera 
-          target={shipRef}
-          warpState={currentWarpState}
-          warpProgress={warpProgress}
-        />
-      )}
-      
-      {/* Chase Camera (when flight is enabled, not warping, and not in orbit/freeLook mode) */}
-      {flightEnabled && !isOrbitEnabled && !isWarping && internalCameraType === 'chase' && (
-        <ChaseCamera 
-          target={shipRef} 
-          enabled={true}
-          warpState={currentWarpState}
-        />
-      )}
-      
-      {/* Orbit Camera Controls - enabled when in freeLook or photo mode */}
-      {isOrbitEnabled && (
-        <OrbitControlsWrapper 
-          shipRef={shipRef}
-          frozenPosition={frozenShipPosition.current}
-        />
-      )}
-      
-      {/* Cinematic Camera - auto-orbiting (only in flight mode, not warping) */}
-      {!isOrbitEnabled && !isWarping && internalCameraType === 'cinematic' && (
-        <CinematicCamera target={shipRef} />
-      )}
+      {isBridgeMode ? (
+        <>
+            <PerspectiveCamera makeDefault position={[0, 1.6, 0]} fov={75} />
+            <Bridge />
+        </>
+      ) : (
+        <>
+          {/* Camera */}
+          <PerspectiveCamera makeDefault position={[0, 1.2, 4.0]} fov={75} />
+          
+          {/* Warp Cinematic Camera - takes over during any warp phase */}
+          {isWarping && !isOrbitEnabled && (
+            <WarpCinematicCamera 
+              target={shipRef}
+              warpState={currentWarpState}
+              warpProgress={warpProgress}
+            />
+          )}
+          
+          {/* Chase Camera (when flight is enabled, not warping, and not in orbit/freeLook mode) */}
+          {flightEnabled && !isOrbitEnabled && !isWarping && internalCameraType === 'chase' && (
+            <ChaseCamera 
+              target={shipRef} 
+              enabled={true}
+              warpState={currentWarpState}
+            />
+          )}
+          
+          {/* Orbit Camera Controls - enabled when in freeLook or photo mode */}
+          {isOrbitEnabled && (
+            <OrbitControlsWrapper 
+              shipRef={shipRef}
+              frozenPosition={frozenShipPosition.current}
+            />
+          )}
+          
+          {/* Cinematic Camera - auto-orbiting (only in flight mode, not warping) */}
+          {!isOrbitEnabled && !isWarping && internalCameraType === 'cinematic' && (
+            <CinematicCamera target={shipRef} />
+          )}
 
-      {/* Lighting */}
-      <ambientLight intensity={0.5} />
-      <directionalLight
-        position={[50, 30, 20]}
-        intensity={1.5}
-        castShadow={qualitySettings?.shadowsEnabled ?? false}
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-camera-far={150}
-        shadow-camera-left={-50}
-        shadow-camera-right={50}
-        shadow-camera-top={50}
-        shadow-camera-bottom={-50}
-      />
-      <pointLight position={[-30, -20, 30]} intensity={0.3} color={0x4488ff} />
-      
-      {/* Rim light for dramatic effect */}
-      <pointLight position={[0, -10, -50]} intensity={0.5} color={0x88aaff} />
+          {/* Lighting */}
+          <ambientLight intensity={0.5} />
+          <directionalLight
+            position={[50, 30, 20]}
+            intensity={1.5}
+            castShadow={qualitySettings?.shadowsEnabled ?? false}
+            shadow-mapSize-width={1024}
+            shadow-mapSize-height={1024}
+            shadow-camera-far={150}
+            shadow-camera-left={-50}
+            shadow-camera-right={50}
+            shadow-camera-top={50}
+            shadow-camera-bottom={-50}
+          />
+          <pointLight position={[-30, -20, 30]} intensity={0.3} color={0x4488ff} />
+          
+          {/* Rim light for dramatic effect */}
+          <pointLight position={[0, -10, -50]} intensity={0.5} color={0x88aaff} />
 
-      {/* Space Environment */}
-      <SpaceEnvironment qualitySettings={qualitySettings} />
+          {/* Space Environment */}
+          <SpaceEnvironment qualitySettings={qualitySettings} />
 
-      {/* Orbit Lines */}
-      <OrbitLines 
-        visible={showOrbitLines} 
-        opacity={0.25}
-        showMoons={false}
-      />
+          {/* Orbit Lines */}
+          <OrbitLines 
+            visible={showOrbitLines} 
+            opacity={0.25}
+            showMoons={false}
+          />
 
-      {/* Sun direction for planet shaders (pointing from sun at origin to planets) */}
-      {(() => {
-        // Sun is at position [0, 0, -500] based on destinations.ts
-        const sunPosition = new THREE.Vector3(0, 0, -500);
-        const sunDir = sunPosition.clone().negate().normalize();
-        
-        return (
-          <>
-            {/* Space Stations - rendered separately from planets */}
-            {DESTINATIONS.filter(dest => dest.type === 'station').map((station) => {
-              if (station.id === 'spacedock') {
-                return (
-                  <Spacedock
-                    key={station.id}
-                    position={station.position.toArray() as [number, number, number]}
-                    scale={station.radius * 0.5}
-                  />
-                );
-              }
-              if (station.id === 'deepspace1') {
-                return (
-                  <DeepSpaceStation
-                    key={station.id}
-                    position={station.position.toArray() as [number, number, number]}
-                    scale={station.radius * 0.8}
-                  />
-                );
-              }
-              return null;
-            })}
+          {/* Sun direction for planet shaders (pointing from sun at origin to planets) */}
+          {(() => {
+            // Sun is at position [0, 0, -500] based on destinations.ts
+            const sunPosition = new THREE.Vector3(0, 0, -500);
+            const sunDir = sunPosition.clone().negate().normalize();
+            
+            return (
+              <>
+                {/* Space Stations - rendered separately from planets */}
+                {DESTINATIONS.filter(dest => dest.type === 'station').map((station) => {
+                  if (station.id === 'spacedock') {
+                    return (
+                      <Spacedock
+                        key={station.id}
+                        position={station.position.toArray() as [number, number, number]}
+                        scale={station.radius * 0.5}
+                      />
+                    );
+                  }
+                  if (station.id === 'deepspace1') {
+                    return (
+                      <DeepSpaceStation
+                        key={station.id}
+                        position={station.position.toArray() as [number, number, number]}
+                        scale={station.radius * 0.8}
+                      />
+                    );
+                  }
+                  return null;
+                })}
 
-            {/* Destination Planets with destruction system */}
-            {DESTINATIONS.filter(dest => dest.type !== 'station').map((dest) => {
-              const health = planetHealth.getPlanet(dest.id);
-              if (!health) return null;
-              
-              const isTargeted = weapons.state.targetId === dest.id;
-              
-              return (
-                <group key={dest.id}>
-                  {/* Destructible planet */}
-                  <DestructiblePlanet 
-                    destination={dest} 
-                    healthState={health}
-                    isTargeted={isTargeted}
-                    sunDirection={sunDir}
-                  />
+                {/* Destination Planets with destruction system */}
+                {DESTINATIONS.filter(dest => dest.type !== 'station').map((dest) => {
+                  const health = planetHealth.getPlanet(dest.id);
+                  if (!health) return null;
                   
-                  {/* Explosion effect */}
-                  {health.damageState === 'exploding' && (
-                    <PlanetExplosion
-                      position={dest.position}
-                      radius={dest.radius}
-                      progress={health.explosionProgress}
-                    />
-                  )}
+                  const isTargeted = weapons.state.targetId === dest.id;
                   
-                  {/* Debris field */}
-                  <DebrisField
-                    position={dest.position}
-                    radius={dest.radius}
-                    isActive={health.damageState === 'debris'}
-                    fadeProgress={health.damageState === 'debris' ? 0 : 1}
-                    shipPosition={shipPositionRef.current}
-                    onShipCollision={handleDebrisCollision}
-                  />
-                </group>
-              );
-            })}
-          </>
-        );
-      })()}
+                  return (
+                    <group key={dest.id}>
+                      {/* Destructible planet */}
+                      <DestructiblePlanet 
+                        destination={dest} 
+                        healthState={health}
+                        isTargeted={isTargeted}
+                        sunDirection={sunDir}
+                      />
+                      
+                      {/* Explosion effect */}
+                      {health.damageState === 'exploding' && (
+                        <PlanetExplosion
+                          position={dest.position}
+                          radius={dest.radius}
+                          progress={health.explosionProgress}
+                        />
+                      )}
+                      
+                      {/* Debris field */}
+                      <DebrisField
+                        position={dest.position}
+                        radius={dest.radius}
+                        isActive={health.damageState === 'debris'}
+                        fadeProgress={health.damageState === 'debris' ? 0 : 1}
+                        shipPosition={shipPositionRef.current}
+                        onShipCollision={handleDebrisCollision}
+                      />
+                    </group>
+                  );
+                })}
+              </>
+            );
+          })()}
 
-      {/* USS Enterprise with flight controls */}
-      <group ref={shipRef}>
-        <Enterprise
-          onSelectComponent={onSelectComponent}
-          hoveredComponent={hoveredComponent}
-          onHoverComponent={onHoverComponent}
-        />
-        
-        {/* Warp Visual Effects - attached to ship so they follow it */}
-        <WarpEffects
-          warpState={currentWarpState}
-          warpLevel={warpLevel}
-        />
-      </group>
+          {/* USS Enterprise with flight controls */}
+          <group ref={shipRef}>
+            <Enterprise
+              onSelectComponent={onSelectComponent}
+              hoveredComponent={hoveredComponent}
+              onHoverComponent={onHoverComponent}
+            />
+            
+            {/* Warp Visual Effects - attached to ship so they follow it */}
+            <WarpEffects
+              warpState={currentWarpState}
+              warpLevel={warpLevel}
+            />
+          </group>
 
-      {/* Phaser beam */}
-      {weapons.state.phaserFiring && weapons.state.targetPosition && (
-        <PhaserBeam
-          startPosition={getPhaserOrigin()}
-          endPosition={weapons.state.targetPosition}
-          intensity={weapons.state.phaserCharge / 100}
-          active={true}
-        />
+          {/* Phaser beam */}
+          {weapons.state.phaserFiring && weapons.state.targetPosition && (
+            <PhaserBeam
+              startPosition={getPhaserOrigin()}
+              endPosition={weapons.state.targetPosition}
+              intensity={weapons.state.phaserCharge / 100}
+              active={true}
+            />
+          )}
+
+          {/* Photon torpedoes */}
+          <PhotonTorpedoes
+            torpedoes={weapons.state.activeTorpedoes}
+          />
+        </>
       )}
-
-      {/* Photon torpedoes */}
-      <PhotonTorpedoes
-        torpedoes={weapons.state.activeTorpedoes}
-      />
 
       {/* Flight and Warp Controller */}
       {flightEnabled && (
@@ -1017,7 +1030,7 @@ function SceneContent({
           shipRef={shipRef}
           onFlightStateUpdate={onFlightStateUpdate}
           onWarpStateUpdate={handleWarpStateUpdate}
-          enabled={flightEnabled}
+          enabled={flightEnabled && !isBridgeMode}
           selectedDestination={selectedDestination}
           warpLevel={warpLevel}
           audioEnabled={audioEnabled}
@@ -1026,7 +1039,7 @@ function SceneContent({
       )}
 
       {/* Post-processing effects */}
-      <PostProcessing cinematicMode={currentWarpState === 'cruising'} qualitySettings={qualitySettings} />
+      <PostProcessing cinematicMode={currentWarpState === 'cruising' || isBridgeMode} qualitySettings={qualitySettings} />
     </>
   );
 }
@@ -1044,6 +1057,7 @@ export function Scene({
   flightEnabled = true,
   cameraMode = 'flight',
   isOrbitEnabled = false,
+  isBridgeMode = false,
   selectedDestination,
   warpLevel = 1,
   audioEnabled = true,
@@ -1083,6 +1097,7 @@ export function Scene({
             flightEnabled={flightEnabled}
             cameraMode={cameraMode}
             isOrbitEnabled={isOrbitEnabled}
+            isBridgeMode={isBridgeMode}
             selectedDestination={selectedDestination}
             warpLevel={warpLevel}
             audioEnabled={audioEnabled}
