@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+:root {
+  --background: #000510;
+  --foreground: #ffffff;
+  --starfleet-blue: #4da6ff;
+  --command-gold: #ffaa00;
+  --alert-red: #ff3333;
+  --panel-bg: rgba(0, 20, 40, 0.7);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Custom scrollbar for panels */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 20, 40, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(77, 166, 255, 0.3);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 166, 255, 0.5);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(77, 166, 255, 0.3);
+  color: #ffffff;
+}
+
+/* Glow animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.5;
+    filter: drop-shadow(0 0 5px var(--starfleet-blue));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 15px var(--starfleet-blue));
+  }
+}
+
+@keyframes scan-line {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100vh);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Glass morphism utility */
+.glass-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(77, 166, 255, 0.3);
+  border-radius: 8px;
+}
+
+/* Text glow utilities */
+.text-glow-blue {
+  text-shadow: 0 0 10px var(--starfleet-blue), 0 0 20px var(--starfleet-blue);
+}
+
+.text-glow-gold {
+  text-shadow: 0 0 10px var(--command-gold), 0 0 20px var(--command-gold);
+}
+
+/* Hide canvas during loading */
+.canvas-loading {
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+.canvas-loaded {
+  opacity: 1;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .hide-on-mobile {
+    display: none;
+  }
+}
