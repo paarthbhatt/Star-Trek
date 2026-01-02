@@ -30,6 +30,8 @@ import { WeaponsState } from '@/hooks/useWeapons';
 import { ShieldState } from '@/hooks/useShipSystems';
 import { Destination, formatETA, calculateDistance, calculateWarpETA } from '@/data/destinations';
 
+import { useBridgeMode } from '@/hooks/useBridgeMode';
+
 // Dynamically import the 3D scene to avoid SSR issues
 const Scene = dynamic(() => import('@/components/Scene').then(mod => mod.Scene), {
   ssr: false,
@@ -62,6 +64,8 @@ export default function Home() {
   const [showPauseMenu, setShowPauseMenu] = useState(false);
   const currentPositionRef = useRef(new THREE.Vector3(0, 0, 0));
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
+
+  const { isBridgeMode, enterBridge, exitBridge, toggleSeated } = useBridgeMode();
   
   const {
     panelStates,
@@ -357,6 +361,20 @@ export default function Home() {
       if (e.key.toLowerCase() === 'o') {
         setShowOrbitLines(prev => !prev);
       }
+      
+      // Toggle bridge mode with B
+      if (e.key.toLowerCase() === 'b') {
+        if (isBridgeMode) {
+            exitBridge();
+        } else {
+            enterBridge();
+        }
+      }
+
+      // Sit/Stand in Bridge Mode with E
+      if (e.key.toLowerCase() === 'e' && isBridgeMode) {
+        toggleSeated();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -432,6 +450,7 @@ export default function Home() {
             flightEnabled={cameraMode.isFlightEnabled}
             cameraMode={cameraMode.mode}
             isOrbitEnabled={cameraMode.isOrbitEnabled}
+            isBridgeMode={isBridgeMode}
             selectedDestination={currentDestination}
             warpLevel={warpLevel}
             audioEnabled={audioEnabled}
@@ -442,10 +461,10 @@ export default function Home() {
             qualitySettings={qualitySettings}
           />
 
-          {/* UI Overlay */}
-          <Header />
+          {/* UI Overlay - Hide most UI in Bridge Mode unless needed */}
+          {!isBridgeMode && <Header />}
           
-          {showPanelsEffective && (
+          {showPanelsEffective && !isBridgeMode && (
             <>
               <ComponentMenu
                 onSelectComponent={selectComponent}
@@ -606,12 +625,12 @@ export default function Home() {
           <RadarDisplay
             shipPosition={currentPositionRef.current}
             targetId={weaponsState?.targetId}
-            visible={showRadar && warpState === 'idle'}
+            visible={showRadar && warpState === 'idle' && !isBridgeMode}
             range={500}
           />
 
           {/* Helm Console - Toggleable, only in flight mode and not during warp */}
-          {showHelmConsole && cameraMode.mode === 'flight' && warpState === 'idle' && (
+          {showHelmConsole && cameraMode.mode === 'flight' && warpState === 'idle' && !isBridgeMode && (
             <HelmConsole
               flightState={flightState}
               warpLevel={warpLevel}
@@ -698,7 +717,7 @@ export default function Home() {
           {/* Keyboard Indicator - show when actively flying */}
           <KeyboardIndicator 
             keys={keyboardState} 
-            visible={cameraMode.mode === 'flight' && warpState === 'idle' && !showHelmConsole}
+            visible={cameraMode.mode === 'flight' && warpState === 'idle' && !showHelmConsole && !isBridgeMode}
             compact
           />
 
@@ -708,11 +727,12 @@ export default function Home() {
             <div><kbd className="text-cyan-500/50">SPACE</kbd> Engage Warp</div>
             <div><kbd className="text-orange-500/50">P</kbd> Phasers <kbd className="text-red-500/50">G</kbd> Torpedos</div>
             <div><kbd className="text-cyan-500/50">N</kbd> Target <kbd className="text-cyan-500/50">V</kbd> Navigation</div>
-                            <div><kbd className="text-cyan-500/50">1-9</kbd> Warp <kbd className="text-cyan-500/50">R</kbd> Radar {showRadar ? '(ON)' : '(OFF)'}</div>
-                            <div><kbd className="text-cyan-500/50">I</kbd> Inspect <kbd className="text-cyan-500/50">C</kbd> Camera</div>
-                            <div><kbd className="text-cyan-500/50">O</kbd> Orbits {showOrbitLines ? '(ON)' : '(OFF)'} <kbd className="text-cyan-500/50">Shift+P</kbd> Photo</div>
+            <div><kbd className="text-cyan-500/50">1-9</kbd> Warp <kbd className="text-cyan-500/50">R</kbd> Radar {showRadar ? '(ON)' : '(OFF)'}</div>
+            <div><kbd className="text-cyan-500/50">I</kbd> Inspect <kbd className="text-cyan-500/50">C</kbd> Camera</div>
+            <div><kbd className="text-cyan-500/50">O</kbd> Orbits {showOrbitLines ? '(ON)' : '(OFF)'} <kbd className="text-cyan-500/50">Shift+P</kbd> Photo</div>
             <div><kbd className="text-cyan-500/50">H</kbd> Helm <kbd className="text-cyan-500/50">?</kbd> Help</div>
             <div><kbd className="text-cyan-500/50">M</kbd> Audio {audioEnabled ? '(ON)' : '(OFF)'}</div>
+             <div><kbd className="text-cyan-500/50">B</kbd> Bridge Mode</div>
           </div>
 
           {/* Camera Mode Indicator */}
