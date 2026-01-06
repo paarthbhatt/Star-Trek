@@ -13,137 +13,100 @@ const components: { id: ShipComponent; name: string; icon: string }[] = [
   { id: 'saucer', name: 'Saucer Section', icon: '◯' },
   { id: 'engineering', name: 'Engineering Hull', icon: '▮' },
   { id: 'nacelles', name: 'Warp Nacelles', icon: '═' },
-  { id: 'bridge', name: 'Main Bridge', icon: '◠' },
   { id: 'deflector', name: 'Deflector Dish', icon: '◎' },
   { id: 'mission', name: 'Mission History', icon: '★' },
 ];
 
 export function ComponentMenu({ onSelectComponent, openPanels }: ComponentMenuProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   
   return (
     <motion.div
       initial={{ x: -100, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.8, delay: 1 }}
-      className="fixed left-6 top-1/2 z-40 -translate-y-1/2"
-      onMouseEnter={() => setIsExpanded(true)}
-      onMouseLeave={() => setIsExpanded(false)}
+      className="fixed left-6 top-1/2 z-40 -translate-y-1/2 flex flex-col gap-3 py-4 px-2"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="flex flex-col gap-2">
-        {/* Collapsed indicator */}
-        <AnimatePresence>
-          {!isExpanded && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="bg-[#001428]/80 border border-[#4da6ff]/30 rounded-lg px-3 py-2 cursor-pointer"
+        {/* Decorative line */}
+        <div className="absolute left-0 top-0 bottom-0 w-[1px] bg-gradient-to-b from-transparent via-blue-500/20 to-transparent -ml-6" />
+
+        {components.map((component, index) => {
+          const isOpen = openPanels.includes(component.id);
+          
+          return (
+            <motion.button
+              key={component.id}
+              layout
+              initial={{ width: 48 }}
+              animate={{ 
+                width: isHovered ? 240 : 48,
+                backgroundColor: isOpen ? 'rgba(59, 130, 246, 0.2)' : 'rgba(0, 5, 16, 0.4)',
+                borderColor: isOpen ? 'rgba(96, 165, 250, 0.5)' : 'rgba(255, 255, 255, 0.1)'
+              }}
+              whileHover={{ 
+                backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                borderColor: 'rgba(96, 165, 250, 0.8)',
+                boxShadow: '0 0 15px rgba(59, 130, 246, 0.3)'
+              }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => onSelectComponent(component.id)}
+              className={`
+                relative h-12 flex items-center overflow-hidden rounded-lg backdrop-blur-md border transition-shadow
+                ${isOpen ? 'shadow-[0_0_10px_rgba(59,130,246,0.2)]' : ''}
+              `}
             >
-              <div className="text-[10px] tracking-wider text-[#88aacc]">
-                SYSTEMS
-              </div>
-              <div className="flex gap-1 mt-1">
-                {components.slice(0, 3).map((c) => (
-                  <span key={c.id} className="text-xs text-[#4da6ff]/50">{c.icon}</span>
-                ))}
-                <span className="text-[10px] text-[#4da6ff]/50">...</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        
-        {/* Expanded menu */}
-        <AnimatePresence>
-          {isExpanded && (
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2 }}
-              className="flex flex-col gap-2"
-            >
-              {/* Title */}
-              <div className="mb-2 text-center">
-                <p className="text-[10px] tracking-[0.3em] text-[#88aacc]">COMPONENTS</p>
+              {/* Icon Container */}
+              <div className="min-w-[48px] h-full flex items-center justify-center shrink-0 z-10">
+                <span className={`text-lg ${isOpen ? 'text-blue-400 drop-shadow-[0_0_5px_rgba(59,130,246,0.8)]' : 'text-blue-200/70'}`}>
+                  {component.icon}
+                </span>
               </div>
 
-              {/* Component buttons */}
-              {components.map((component, index) => {
-                const isOpen = openPanels.includes(component.id);
-                
-                return (
-                  <motion.button
-                    key={component.id}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: index * 0.05 }}
-                    whileHover={{ scale: 1.05, x: 5 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => onSelectComponent(component.id)}
-                    className={`
-                      group relative flex items-center gap-3 rounded-lg px-4 py-3
-                      backdrop-blur-md transition-all duration-300
-                      ${isOpen 
-                        ? 'bg-[#4da6ff]/20 border border-[#4da6ff]/50' 
-                        : 'bg-[#001428]/70 border border-[#4da6ff]/20 hover:border-[#4da6ff]/40'
-                      }
-                    `}
-                  >
-                    {/* Icon */}
-                    <span 
-                      className={`
-                        text-lg transition-colors duration-300
-                        ${isOpen ? 'text-[#4da6ff]' : 'text-[#88aacc] group-hover:text-[#4da6ff]'}
-                      `}
-                    >
-                      {component.icon}
+              {/* Label Container */}
+              <motion.div 
+                className="flex items-center whitespace-nowrap overflow-hidden"
+                animate={{ opacity: isHovered ? 1 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div className="flex flex-col items-start pl-2">
+                    <span className={`text-xs font-bold tracking-[0.15em] uppercase ${isOpen ? 'text-white' : 'text-blue-100/60'}`}>
+                        {component.name}
                     </span>
-
-                    {/* Label */}
-                    <span 
-                      className={`
-                        text-xs tracking-wider transition-colors duration-300
-                        ${isOpen ? 'text-[#4da6ff]' : 'text-[#88aacc] group-hover:text-white'}
-                      `}
-                    >
-                      {component.name}
+                    <span className="text-[9px] font-mono text-blue-400/50 tracking-widest uppercase">
+                        {isOpen ? 'ONLINE' : 'SYSTEM READY'}
                     </span>
+                </div>
+              </motion.div>
 
-                    {/* Active indicator */}
-                    {isOpen && (
-                      <motion.div
-                        layoutId="activeIndicator"
-                        className="absolute -right-1 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full bg-[#4da6ff]"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ duration: 0.2 }}
-                      />
-                    )}
+              {/* Active Indicator Bar */}
+              {isOpen && (
+                <motion.div
+                  layoutId="active-glow"
+                  className="absolute left-0 top-0 bottom-0 w-[2px] bg-blue-400 shadow-[0_0_10px_rgba(59,130,246,1)]"
+                />
+              )}
+              
+              {/* Tech Accents - Only visible when hovered */}
+              <AnimatePresence>
+                {isHovered && (
+                    <>
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            className="absolute top-1 right-1 w-1 h-1 border-t border-r border-blue-400/30" 
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            className="absolute bottom-1 right-1 w-1 h-1 border-b border-r border-blue-400/30" 
+                        />
+                    </>
+                )}
+              </AnimatePresence>
 
-                    {/* Hover glow */}
-                    <div 
-                      className={`
-                        absolute inset-0 rounded-lg opacity-0 transition-opacity duration-300
-                        group-hover:opacity-100
-                        ${isOpen ? '' : 'shadow-[inset_0_0_20px_rgba(77,166,255,0.1)]'}
-                      `}
-                    />
-                  </motion.button>
-                );
-              })}
-
-              {/* Decorative element */}
-              <motion.div
-                initial={{ scaleY: 0 }}
-                animate={{ scaleY: 1 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-                className="mx-auto mt-4 h-20 w-px bg-gradient-to-b from-[#4da6ff]/50 to-transparent"
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            </motion.button>
+          );
+        })}
     </motion.div>
   );
 }

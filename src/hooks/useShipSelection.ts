@@ -12,7 +12,6 @@ const initialPanelStates: PanelStates = {
   saucer: initialPanelState,
   engineering: initialPanelState,
   nacelles: initialPanelState,
-  bridge: initialPanelState,
   deflector: initialPanelState,
   mission: initialPanelState,
 };

@@ -28,13 +28,13 @@ interface UseFlightControlsOptions {
   enabled?: boolean;
 }
 
-const defaultOptions: Required<Omit<UseFlightControlsOptions, 'onWarpEngage' | 'onFullStop'>> = {
-  maxImpulseSpeed: 15,     // Units per second at 100% impulse
-  acceleration: 8,         // Acceleration rate
-  deceleration: 5,         // Deceleration rate
-  turnRate: 0.8,           // Yaw rate
-  rollRate: 1.0,           // Roll rate
-  dampingFactor: 0.98,     // Velocity damping
+  const defaultOptions: Required<Omit<UseFlightControlsOptions, 'onWarpEngage' | 'onFullStop'>> = {
+  maxImpulseSpeed: 15,
+  acceleration: 15,
+  deceleration: 10,
+  turnRate: 0.8,
+  rollRate: 1.0,
+  dampingFactor: 0.98,
   enabled: true,
 };
 
@@ -93,12 +93,18 @@ export function useFlightControls(options: UseFlightControlsOptions = {}) {
 
     // === ROTATION (YAW and ROLL) ===
     
-    // Yaw (A/D keys)
+    // Yaw (A/D keys) - Now with coordinated BANKING (Roll)
+    // Pressing A (Left) -> Yaw Left AND Roll Left
+    // Pressing D (Right) -> Yaw Right AND Roll Right
+    const BANK_FACTOR = 0.8; // Reduced from 1.5 to prevent excessive tilting
+
     if (keys.left) {
-      state.rotation.y += turnRate * dt;
+      state.rotation.y += turnRate * dt; // Turn Left (Positive Y)
+      state.rotation.z += rollRate * BANK_FACTOR * dt;
     }
     if (keys.right) {
-      state.rotation.y -= turnRate * dt;
+      state.rotation.y -= turnRate * dt; // Turn Right (Negative Y)
+      state.rotation.z -= rollRate * BANK_FACTOR * dt;
     }
 
     // Pitch (R/F keys - commonly used in flight sims for up/down)
@@ -115,6 +121,15 @@ export function useFlightControls(options: UseFlightControlsOptions = {}) {
     }
     if (keys.rollRight) {
       state.rotation.z -= rollRate * dt;
+    } else {
+       // Auto-level roll only when no input for >2 seconds
+       // actually, just simple damping is better than aggressive leveling
+       const rollDamping = 0.5;
+       if (state.rotation.z > 0.01) {
+           state.rotation.z -= rollDamping * dt;
+       } else if (state.rotation.z < -0.01) {
+           state.rotation.z += rollDamping * dt;
+       }
     }
 
     // Clamp roll to prevent excessive rolling
@@ -122,10 +137,11 @@ export function useFlightControls(options: UseFlightControlsOptions = {}) {
 
     // === THROTTLE (W/S keys) ===
     
+    // Fix: Forward means INCREASE speed (W), Backward means DECREASE speed (S)
     if (keys.forward) {
-      state.targetSpeed = Math.min(state.targetSpeed + acceleration * dt * 10, 100);
+      state.targetSpeed = Math.min(state.targetSpeed + acceleration * dt * 20, 100);
     } else if (keys.backward) {
-      state.targetSpeed = Math.max(state.targetSpeed - deceleration * dt * 10, 0);
+      state.targetSpeed = Math.max(state.targetSpeed - deceleration * dt * 20, 0); // Allow slowing down to stop
     }
 
     // Full stop (X key)

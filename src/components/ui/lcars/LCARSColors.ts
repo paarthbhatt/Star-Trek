@@ -39,8 +39,6 @@ export const LCARS_COLORS = {
   warp: '#6699FF',        // Warp systems
   impulse: '#FF8844',     // Impulse engines
   shields: '#66CCFF',     // Shield systems
-  phaser: '#FF6600',      // Phaser weapons
-  torpedo: '#FF3333',     // Torpedo systems
 } as const;
 
 // Type for LCARS colors
@@ -66,9 +64,6 @@ export function getSystemColor(system: string): string {
     case 'navigation':
     case 'helm':
       return LCARS_COLORS.orange;
-    case 'tactical':
-    case 'weapons':
-      return LCARS_COLORS.salmon;
     case 'engineering':
     case 'warp':
       return LCARS_COLORS.pink;

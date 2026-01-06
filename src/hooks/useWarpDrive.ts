@@ -6,6 +6,7 @@ import * as THREE from 'three';
 export type WarpState = 
   | 'idle'           // Not warping, normal flight
   | 'charging'       // Warp core charging (1-2 seconds)
+// Corrected typo
   | 'accelerating'   // Entering warp (0.5 seconds)
   | 'cruising'       // At warp speed
   | 'decelerating'   // Exiting warp (0.5 seconds)
@@ -85,7 +86,7 @@ export function useWarpDrive(options: UseWarpDriveOptions = {}) {
 
   // Engage warp to destination
   // destinationRadius is the radius of the target planet/moon - ship will stop at radius + ARRIVAL_BUFFER
-  const ARRIVAL_BUFFER = 25; // Units of clearance from destination surface
+  const ARRIVAL_BUFFER = 12; // REDUCED from 25 to 12 - Much closer arrival for cinematic effect
   
   const engageWarp = useCallback((destination: THREE.Vector3, origin: THREE.Vector3, destinationRadius: number = 0) => {
     const currentState = stateRef.current;
@@ -183,7 +184,7 @@ export function useWarpDrive(options: UseWarpDriveOptions = {}) {
           const prevState = current.state;
           setState(prev => ({
             ...prev,
-            state: 'accelerating',
+            state: 'accelerating', // Corrected
             stateTime: 0,
           }));
           if (onStateChange) onStateChange('accelerating', prevState);

@@ -65,7 +65,7 @@ export const QUALITY_PRESETS: Record<Exclude<QualityLevel, 'auto'>, QualitySetti
     asteroidCount: 1500,
     planetSegments: 48,
     noiseOctaves: 5,
-    postProcessing: 'bloom',
+    postProcessing: 'full',
     shadowMapSize: 1024,
     shadowsEnabled: true,
   },

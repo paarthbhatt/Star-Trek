@@ -88,6 +88,24 @@ body {
   border-radius: 8px;
 }
 
+/* Holographic / Cinematic UI Styles */
+.glass-holographic {
+  background: rgba(0, 5, 16, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 4px 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 20px rgba(255, 255, 255, 0.05);
+}
+
+.tech-grid {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
 /* Text glow utilities */
 .text-glow-blue {
   text-shadow: 0 0 10px var(--starfleet-blue), 0 0 20px var(--starfleet-blue);
@@ -95,6 +113,26 @@ body {
 
 .text-glow-gold {
   text-shadow: 0 0 10px var(--command-gold), 0 0 20px var(--command-gold);
+}
+
+.text-glow-orange {
+  text-shadow: 0 0 8px #FF9900, 0 0 15px rgba(255, 153, 0, 0.5);
+}
+
+.text-glow-red {
+  text-shadow: 0 0 8px #FF3333, 0 0 15px rgba(255, 51, 51, 0.5);
+}
+
+.border-glow-orange {
+  box-shadow: 0 0 10px rgba(255, 153, 0, 0.3), inset 0 0 10px rgba(255, 153, 0, 0.1);
+}
+
+.border-glow-blue {
+  box-shadow: 0 0 10px rgba(153, 153, 255, 0.3), inset 0 0 10px rgba(153, 153, 255, 0.1);
+}
+
+.border-glow-warp {
+  box-shadow: 0 0 15px rgba(102, 153, 255, 0.4), inset 0 0 15px rgba(102, 153, 255, 0.2);
 }
 
 /* Hide canvas during loading */

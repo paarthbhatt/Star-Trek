@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 
+export interface ScanData {
+  population?: string;
+  resources?: string[];
+  atmosphereDetails?: string;
+  threatLevel?: 'None' | 'Low' | 'Medium' | 'High' | 'Extreme';
+  lifeSigns?: string;
+  tacticalAnalysis?: string;
+}
+
 export interface Destination {
   id: string;
   name: string;
@@ -21,6 +30,7 @@ export interface Destination {
   distance: number;        // Distance from origin in units
   starfleetPresence?: string; // Star Trek lore
   surfaceFeatures?: string[]; // Notable surface characteristics
+  scanData?: ScanData;
 }
 
 // Scale: Compressed logarithmic for gameplay
@@ -46,6 +56,14 @@ export const DESTINATIONS: Destination[] = [
     rotationSpeed: 0.02,
     distance: 500,
     starfleetPresence: 'Sol Station - Primary Federation hub',
+    scanData: {
+        population: 'None',
+        resources: ['Hydrogen', 'Helium', 'Solar Plasma'],
+        atmosphereDetails: 'Stellar Corona',
+        threatLevel: 'Extreme',
+        lifeSigns: 'None',
+        tacticalAnalysis: 'Extreme heat and radiation. Shield failure imminent in close proximity.'
+    }
   },
 
   // === INNER PLANETS ===
@@ -63,6 +81,14 @@ export const DESTINATIONS: Destination[] = [
     distance: 100,
     starfleetPresence: 'Mercury Research Station - Solar observation',
     surfaceFeatures: ['Caloris Basin', 'Scarps', 'Craters'],
+    scanData: {
+      population: '150 Scientists',
+      resources: ['Solar Energy', 'Metals'],
+      atmosphereDetails: 'None (Trace Exosphere)',
+      threatLevel: 'Low',
+      lifeSigns: 'Minimal',
+      tacticalAnalysis: 'Research facility only. No defensive capabilities.'
+    },
   },
   {
     id: 'venus',
@@ -79,6 +105,14 @@ export const DESTINATIONS: Destination[] = [
     distance: 180,
     starfleetPresence: 'Ishtar Station - Atmospheric research',
     surfaceFeatures: ['Maxwell Montes', 'Ishtar Terra', 'Aphrodite Terra'],
+    scanData: {
+      population: '450',
+      resources: ['Carbon Dioxide', 'Sulfuric Acid', 'Geothermal Energy'],
+      atmosphereDetails: 'Toxic High Pressure CO2 (Class N)',
+      threatLevel: 'Low',
+      lifeSigns: 'Colony habitats only',
+      tacticalAnalysis: 'Atmospheric conditions hazardous to shields.'
+    },
   },
   {
     id: 'earth',
@@ -96,6 +130,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['luna'],
     starfleetPresence: 'Starfleet Headquarters, Spacedock, Multiple orbital facilities',
     surfaceFeatures: ['Oceans', 'Continents', 'Cloud systems'],
+    scanData: {
+      population: '9.2 Billion',
+      resources: ['Deuterium', 'Biomatter', 'Water'],
+      atmosphereDetails: 'Nitrogen-Oxygen (Standard Class M)',
+      threatLevel: 'None',
+      lifeSigns: 'Abundant human and diverse biological life',
+      tacticalAnalysis: 'Heavily defended. Starfleet HQ presence. Planetary shields active.'
+    },
   },
   {
     id: 'luna',
@@ -128,6 +170,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['phobos', 'deimos'],
     starfleetPresence: 'Utopia Planitia Fleet Yards - Primary ship construction',
     surfaceFeatures: ['Olympus Mons', 'Valles Marineris', 'Polar ice caps'],
+    scanData: {
+      population: '450 Million',
+      resources: ['Iron', 'Titanium', 'Terraforming agents'],
+      atmosphereDetails: 'Thin CO2 (Class K), undergoing terraforming',
+      threatLevel: 'Low',
+      lifeSigns: 'Human colonies, engineered vegetation',
+      tacticalAnalysis: 'Orbital shipyards present. Strategic value high.'
+    },
   },
   {
     id: 'phobos',
@@ -172,6 +222,14 @@ export const DESTINATIONS: Destination[] = [
     distance: 550,
     starfleetPresence: 'Ceres Station - Mining operations',
     surfaceFeatures: ['Occator Crater', 'Bright spots'],
+    scanData: {
+        population: '15,000',
+        resources: ['Water Ice', 'Rare Minerals', 'Platinum'],
+        atmosphereDetails: 'None',
+        threatLevel: 'Low',
+        lifeSigns: 'Colony signatures detected',
+        tacticalAnalysis: 'Standard orbital defenses. Mining lasers present.'
+    }
   },
   {
     id: 'vesta',
@@ -205,6 +263,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['io', 'europa', 'ganymede', 'callisto'],
     starfleetPresence: 'Jupiter Station - Deep space research',
     surfaceFeatures: ['Great Red Spot', 'Cloud bands', 'Storms'],
+    scanData: {
+      population: 'Station personnel only',
+      resources: ['Hydrogen', 'Helium', 'Metallic Hydrogen'],
+      atmosphereDetails: 'Hydrogen-Helium (Class J Gas Giant)',
+      threatLevel: 'Extreme',
+      lifeSigns: 'None on surface. Orbital stations inhabited.',
+      tacticalAnalysis: 'Atmospheric pressure fatal. High radiation levels.'
+    },
   },
   {
     id: 'io',
@@ -284,6 +350,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['titan', 'enceladus', 'mimas', 'rhea'],
     starfleetPresence: 'Titan Station - Outer system command',
     surfaceFeatures: ['Hexagonal storm', 'Cloud bands', 'Ring system'],
+    scanData: {
+        population: 'Orbital Stations',
+        resources: ['Hydrogen', 'Helium'],
+        atmosphereDetails: 'Hydrogen-Helium (Class J Gas Giant)',
+        threatLevel: 'Medium',
+        lifeSigns: 'None on surface',
+        tacticalAnalysis: 'Ring system poses navigational hazard. High magnetic interference.'
+    }
   },
   {
     id: 'titan',
@@ -300,6 +374,14 @@ export const DESTINATIONS: Destination[] = [
     distance: 1340,
     starfleetPresence: 'Titan Research Facility',
     surfaceFeatures: ['Kraken Mare', 'Methane lakes', 'Dunes'],
+    scanData: {
+        population: '2,500',
+        resources: ['Hydrocarbons', 'Methane', 'Nitrogen'],
+        atmosphereDetails: 'Dense Nitrogen-Methane',
+        threatLevel: 'Low',
+        lifeSigns: 'Colony signatures',
+        tacticalAnalysis: 'Thick atmosphere blocks standard sensors.'
+    }
   },
   {
     id: 'enceladus',
@@ -363,6 +445,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['miranda', 'ariel', 'titania'],
     starfleetPresence: 'Uranus Survey Station',
     surfaceFeatures: ['Featureless atmosphere', 'Extreme axial tilt'],
+    scanData: {
+        population: '500 (Orbital)',
+        resources: ['Hydrogen', 'Helium', 'Methane Ice'],
+        atmosphereDetails: 'Ice Giant Atmosphere',
+        threatLevel: 'Medium',
+        lifeSigns: 'None',
+        tacticalAnalysis: 'Extreme cold. Atmospheric turbulence.'
+    }
   },
   {
     id: 'miranda',
@@ -424,6 +514,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['triton'],
     starfleetPresence: 'Neptune Listening Post - Edge of Sol system',
     surfaceFeatures: ['Great Dark Spot', 'Scooter', 'High-speed winds'],
+    scanData: {
+        population: '200 (Outpost)',
+        resources: ['Hydrogen', 'Helium', 'Methane'],
+        atmosphereDetails: 'Ice Giant Atmosphere (High Wind Velocity)',
+        threatLevel: 'High',
+        lifeSigns: 'Minimal',
+        tacticalAnalysis: 'Supersonic winds make atmospheric entry impossible.'
+    }
   },
   {
     id: 'triton',
@@ -458,6 +556,14 @@ export const DESTINATIONS: Destination[] = [
     moons: ['charon'],
     starfleetPresence: 'Pluto Research Outpost',
     surfaceFeatures: ['Sputnik Planitia', 'Tombaugh Regio', 'Mountains'],
+    scanData: {
+        population: '50',
+        resources: ['Nitrogen Ice', 'Water Ice'],
+        atmosphereDetails: 'Trace Nitrogen',
+        threatLevel: 'Low',
+        lifeSigns: 'Minimal',
+        tacticalAnalysis: 'Remote outpost. No strategic value.'
+    }
   },
   {
     id: 'charon',

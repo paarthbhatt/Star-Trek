@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { ASTEROID_BELT, KUIPER_BELT } from '@/data/destinations';
@@ -103,7 +103,7 @@ export function AsteroidBelt({ type = 'main', qualitySettings }: AsteroidBeltPro
   }, []);
   
   // Initialize instance matrices
-  useMemo(() => {
+  useLayoutEffect(() => {
     if (meshRef.current) {
       matrices.forEach((matrix, i) => {
         meshRef.current!.setMatrixAt(i, matrix);

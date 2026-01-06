@@ -1,16 +1,18 @@
+
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import * as THREE from 'three';
 import { AnimatePresence, motion } from 'framer-motion';
+// import { useFrame } from '@react-three/fiber';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Header } from '@/components/ui/Header';
 import { ComponentMenu } from '@/components/ui/ComponentMenu';
 import { InfoPanelsContainer } from '@/components/ui/InfoPanel';
-import { CornerDecorations } from '@/components/ui/SystemReadout';
 import { HelmConsole } from '@/components/ui/HelmConsole';
 import { DestinationSelector } from '@/components/ui/DestinationSelector';
+import { ScannerDisplay } from '@/components/ui/ScannerDisplay';
 import { SettingsPanel, SettingsButton, FPSCounter } from '@/components/ui/SettingsPanel';
 import { KeyboardIndicator } from '@/components/ui/KeyboardIndicator';
 import { Tutorial, useFirstVisit } from '@/components/ui/Tutorial';
@@ -19,18 +21,18 @@ import { PhotoMode } from '@/components/ui/PhotoMode';
 import { AlertOverlay, AnnouncementToast } from '@/components/ui/AlertOverlay';
 import { PauseMenu, PauseButton } from '@/components/ui/PauseMenu';
 import { useShipSelection } from '@/hooks/useShipSelection';
-import { useCameraMode, CameraMode, getCameraModeDisplayName } from '@/hooks/useCameraMode';
+import { useCameraMode, getCameraModeDisplayName } from '@/hooks/useCameraMode';
 import { useSettings } from '@/hooks/useSettings';
 import { useKeyboardState } from '@/hooks/useKeyboardState';
 import { useAnnouncements } from '@/hooks/useAnnouncements';
-import { WARP_LINES, TACTICAL_LINES, ALERT_LINES, SYSTEM_LINES } from '@/data/voiceLines';
+import { WARP_LINES, ALERT_LINES, SYSTEM_LINES } from '@/data/voiceLines';
 import { FlightState } from '@/hooks/useFlightControls';
 import { WarpState } from '@/hooks/useWarpDrive';
-import { WeaponsState } from '@/hooks/useWeapons';
+import { useWeapons, WeaponTarget, WeaponsState } from '@/hooks/useWeapons';
 import { ShieldState } from '@/hooks/useShipSystems';
+import { ScannerState } from '@/hooks/useScanner';
 import { Destination, formatETA, calculateDistance, calculateWarpETA } from '@/data/destinations';
-
-import { useBridgeMode } from '@/hooks/useBridgeMode';
+import { SystemReadout } from '@/components/ui/SystemReadout';
 
 // Dynamically import the 3D scene to avoid SSR issues
 const Scene = dynamic(() => import('@/components/Scene').then(mod => mod.Scene), {
@@ -38,7 +40,10 @@ const Scene = dynamic(() => import('@/components/Scene').then(mod => mod.Scene),
   loading: () => null,
 });
 
+import { useAudio } from '@/hooks/useAudio';
+
 export default function Home() {
+  const audio = useAudio();
   const [isLoading, setIsLoading] = useState(true);
   const [flightState, setFlightState] = useState<FlightState | null>(null);
   const [weaponsState, setWeaponsState] = useState<WeaponsState | null>(null);
@@ -47,6 +52,9 @@ export default function Home() {
   const [alertLevel, setAlertLevel] = useState<'green' | 'yellow' | 'red'>('green');
   const [warpLevel, setWarpLevel] = useState(1);
   const [warpState, setWarpState] = useState<WarpState>('idle');
+  const [scannerState, setScannerState] = useState<ScannerState>({
+      isScanning: false, scanProgress: 0, targetId: null, scanData: null, scanComplete: false, error: null
+  });
   const [showPanels, setShowPanels] = useState(true);
   const [showHelmConsole, setShowHelmConsole] = useState(true);
   const [showDestinationSelector, setShowDestinationSelector] = useState(false);
@@ -59,14 +67,65 @@ export default function Home() {
   const [destroyedPlanetName, setDestroyedPlanetName] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [currentFps, setCurrentFps] = useState(60);
-  const [showRadar, setShowRadar] = useState(false);
+  const [showRadar, setShowRadar] = useState(true);
   const [showOrbitLines, setShowOrbitLines] = useState(false);
   const [showPauseMenu, setShowPauseMenu] = useState(false);
   const currentPositionRef = useRef(new THREE.Vector3(0, 0, 0));
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
 
-  const { isBridgeMode, enterBridge, exitBridge, toggleSeated } = useBridgeMode();
+  // Weapons State
+  const [torpedoes, setTorpedoes] = useState<{ id: string; position: THREE.Vector3; targetPosition: THREE.Vector3 }[]>([]);
+
+  const handleFireTorpedo = useCallback(() => {
+    // Check if we can fire based on weapons state provided by hook
+    // Note: We access state via wState in render or callback refs if needed, 
+    // but here we trust the callback is only invoked if valid
+    
+    // However, we need the CURRENT target to fire at
+    // We can rely on the weaponsState state variable we sync
+    if (!flightState || !weaponsState || !weaponsState.target) return;
+    
+    const newTorpedo = {
+        id: Date.now().toString(),
+        position: flightState.position.clone(),
+        targetPosition: weaponsState.target.position.clone()
+    };
+    
+    setTorpedoes(prev => [...prev, newTorpedo]);
+  }, [flightState, weaponsState]);
+
+  const handleTorpedoImpact = useCallback((id: string) => {
+    setTorpedoes(prev => prev.filter(t => t.id !== id));
+    audio.playSound('torpedoImpact');
+  }, [audio]);
+
+  const {
+      weaponsState: wState,
+      cycleTarget,
+      firePhasers,
+      fireTorpedo,
+      updateWeapons,
+      enemies
+  } = useWeapons({
+      shipPosition: flightState?.position ?? new THREE.Vector3(),
+      shipRotation: new THREE.Euler(),
+      onFireTorpedo: handleFireTorpedo
+  });
+
+  // Sync weapons state
+  useEffect(() => {
+      setWeaponsState(wState);
+  }, [wState]);
+
+  // Update weapons loop - moved to Scene or a wrapper component
+  // useFrame cannot be used here as Home is not inside Canvas
   
+  // NOTE: We need to solve the weapon update loop.
+  // Ideally, useWeapons logic should be inside a component inside <Canvas> in Scene.tsx
+  // OR we pass updateWeapons down to Scene.tsx and call it there?
+  // Let's pass updateWeapons to Scene
+
+
   const {
     panelStates,
     hoveredComponent,
@@ -99,7 +158,7 @@ export default function Home() {
   const [showTutorial, setShowTutorial] = useState(false);
 
   // Announcement system
-  const { currentAnnouncement, announce, announceImmediate, isSpeaking } = useAnnouncements({
+  const { currentAnnouncement, announce, announceImmediate } = useAnnouncements({
     enabled: true,
     voiceEnabled: settings.audioEnabled,
     volume: settings.audioVolume,
@@ -146,13 +205,13 @@ export default function Home() {
       warpSequenceTimeRef.current = Date.now();
       hasEnteredCruising.current = false;
       
-      // Queue announcements in sequence
-      announce(WARP_LINES.warpCharging);
-      setTimeout(() => announce(WARP_LINES.enginesStandby), 800);
-      setTimeout(() => announce(WARP_LINES.courseLaidIn), 1600);
-      setTimeout(() => announce(WARP_LINES.braceForAcceleration), 2400);
-      
-    } else if (warpState === 'accelerating') {
+       // Queue announcements in sequence
+       announce(WARP_LINES.calculatingRoute);
+       setTimeout(() => announce(WARP_LINES.courseLaidIn), 800);
+       setTimeout(() => announce(WARP_LINES.warpCharging), 1800);
+       setTimeout(() => announce(WARP_LINES.enginesStandby), 3000);
+       
+     } else if (warpState === 'accelerating') {
       announce(WARP_LINES.warpEngage);
       
     } else if (warpState === 'cruising') {
@@ -248,14 +307,15 @@ export default function Home() {
     setWarpState(state);
   }, []);
 
-  const handleWeaponsStateUpdate = useCallback((state: WeaponsState) => {
-    setWeaponsState(state);
-  }, []);
-
   const handleShipSystemsUpdate = useCallback((newShields: ShieldState, newHull: number, newAlert: 'green' | 'yellow' | 'red') => {
     setShields(newShields);
     setHullIntegrity(newHull);
     setAlertLevel(newAlert);
+  }, []);
+
+  // Update scanner state
+  const handleScannerUpdate = useCallback((state: ScannerState) => {
+    setScannerState(state);
   }, []);
 
   const handlePlanetDestroyed = useCallback((planetName: string) => {
@@ -284,6 +344,17 @@ export default function Home() {
     window.location.reload();
   }, []);
 
+  // Handlers for Scanner Inspect Integration
+  const handleInspect = useCallback(() => {
+    // Switch to freeLook mode for close up inspection
+    cameraMode.setMode('freeLook');
+  }, [cameraMode]);
+
+  const handleEnterOrbit = useCallback(() => {
+    // Switch to cinematic mode for orbiting
+    cameraMode.setMode('cinematic');
+  }, [cameraMode]);
+
   // Calculate ETA to current destination
   const distance = currentDestination 
     ? calculateDistance(currentPositionRef.current, currentDestination.position)
@@ -304,15 +375,6 @@ export default function Home() {
       if (e.key === 'Tab') {
         e.preventDefault();
         setShowPanels(prev => !prev);
-      }
-      // Open destination selector with N when not in warp
-      if (e.key.toLowerCase() === 'n' && warpState === 'idle') {
-        // If no active weapon target, open navigation
-        // Otherwise N cycles through targets
-        if (!showDestinationSelector) {
-          setTargetNext(true);
-          setTimeout(() => setTargetNext(false), 100);
-        }
       }
       // Open navigation with V
       if (e.key.toLowerCase() === 'v') {
@@ -336,22 +398,12 @@ export default function Home() {
         setAudioEnabled(prev => !prev);
       }
       // Toggle helm console with H (only in flight mode)
-      // Note: H also returns to flight mode from freeLook/cinematic (handled in useCameraMode)
       if (e.key.toLowerCase() === 'h' && cameraMode.mode === 'flight') {
         setShowHelmConsole(prev => !prev);
       }
       // Toggle controls help with ?
       if (e.key === '?') {
         setShowControlsHelp(prev => !prev);
-      }
-      // Fire phaser with P (hold)
-      if (e.key.toLowerCase() === 'p' && warpState === 'idle') {
-        setPhaserFiring(true);
-      }
-      // Fire torpedo with G
-      if (e.key.toLowerCase() === 'g' && warpState === 'idle') {
-        setTorpedoFired(true);
-        setTimeout(() => setTorpedoFired(false), 100);
       }
       // Toggle radar with R
       if (e.key.toLowerCase() === 'r') {
@@ -361,36 +413,13 @@ export default function Home() {
       if (e.key.toLowerCase() === 'o') {
         setShowOrbitLines(prev => !prev);
       }
-      
-      // Toggle bridge mode with B
-      if (e.key.toLowerCase() === 'b') {
-        if (isBridgeMode) {
-            exitBridge();
-        } else {
-            enterBridge();
-        }
-      }
-
-      // Sit/Stand in Bridge Mode with E
-      if (e.key.toLowerCase() === 'e' && isBridgeMode) {
-        toggleSeated();
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      // Stop phaser when P released
-      if (e.key.toLowerCase() === 'p') {
-        setPhaserFiring(false);
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [warpState, showDestinationSelector, cameraMode.mode]);
+  }, [warpState, showDestinationSelector, cameraMode.mode, showControlsHelp, showSettings, showPauseMenu]);
 
   // Auto-hide panels during warp
   const showPanelsEffective = showPanels && warpState === 'idle';
@@ -408,13 +437,6 @@ export default function Home() {
   };
 
   const warpStatus = getWarpStatus();
-
-  // Alert level colors
-  const alertColors = {
-    green: 'border-green-500/30',
-    yellow: 'border-yellow-500/50',
-    red: 'border-red-500/70',
-  };
 
   return (
     <main className={`relative h-screen w-screen overflow-hidden bg-[#000510]`}>
@@ -435,36 +457,37 @@ export default function Home() {
         <AnnouncementToast announcement={currentAnnouncement} />
       )}
 
-      {/* 3D Scene */}
-      {!isLoading && (
-        <>
-          <Scene
-            onSelectComponent={selectComponent}
-            hoveredComponent={hoveredComponent}
-            onHoverComponent={setHoveredComponent}
-            onFlightStateUpdate={handleFlightStateUpdate}
-            onWarpStateUpdate={handleWarpStateUpdate}
-            onWeaponsStateUpdate={handleWeaponsStateUpdate}
-            onShipSystemsUpdate={handleShipSystemsUpdate}
-            onPlanetDestroyed={handlePlanetDestroyed}
-            flightEnabled={cameraMode.isFlightEnabled}
-            cameraMode={cameraMode.mode}
-            isOrbitEnabled={cameraMode.isOrbitEnabled}
-            isBridgeMode={isBridgeMode}
-            selectedDestination={currentDestination}
-            warpLevel={warpLevel}
-            audioEnabled={audioEnabled}
-            phaserFiring={phaserFiring}
-            torpedoFired={torpedoFired}
-            targetNext={targetNext}
-            showOrbitLines={showOrbitLines}
-            qualitySettings={qualitySettings}
-          />
+          {/* 3D Scene */}
+          {!isLoading && (
+            <>
+              <Scene
+                onSelectComponent={selectComponent}
+                hoveredComponent={hoveredComponent}
+                onHoverComponent={setHoveredComponent}
+                onFlightStateUpdate={handleFlightStateUpdate}
+                onWarpStateUpdate={handleWarpStateUpdate}
+                onShipSystemsUpdate={handleShipSystemsUpdate}
+                onScannerUpdate={handleScannerUpdate}
+                onPlanetDestroyed={handlePlanetDestroyed}
+                flightEnabled={cameraMode.isFlightEnabled}
+                cameraMode={cameraMode.mode}
+                isOrbitEnabled={cameraMode.isOrbitEnabled}
+                selectedDestination={currentDestination}
+                warpLevel={warpLevel}
+                audioEnabled={audioEnabled}
+                showOrbitLines={showOrbitLines}
+                qualitySettings={qualitySettings}
+                // Combat Props
+                torpedoes={torpedoes}
+                enemies={enemies}
+                onTorpedoImpact={handleTorpedoImpact}
+                onUpdateWeapons={updateWeapons}
+              />
 
-          {/* UI Overlay - Hide most UI in Bridge Mode unless needed */}
-          {!isBridgeMode && <Header />}
-          
-          {showPanelsEffective && !isBridgeMode && (
+              {/* UI Overlay */}
+          <Header />
+
+          {showPanelsEffective && (
             <>
               <ComponentMenu
                 onSelectComponent={selectComponent}
@@ -522,115 +545,15 @@ export default function Home() {
             </div>
           )}
 
-          {/* Weapons Status HUD */}
-          {weaponsState && warpState === 'idle' && (
-            <div className="fixed bottom-24 right-4 z-30">
-              <div className={`bg-black/60 backdrop-blur-sm border ${alertColors[alertLevel]} rounded-lg p-3 font-mono text-xs`}>
-                <div className="text-gray-400 uppercase tracking-wider mb-2">Tactical</div>
-                
-                {/* Target Info */}
-                <div className="mb-2">
-                  <span className="text-gray-500">Target: </span>
-                  {weaponsState.targetName ? (
-                    <span className="text-red-400">{weaponsState.targetName}</span>
-                  ) : (
-                    <span className="text-gray-600">None</span>
-                  )}
-                  {weaponsState.targetDistance > 0 && (
-                    <span className="text-gray-500 ml-2">
-                      ({weaponsState.targetDistance.toFixed(0)}u)
-                    </span>
-                  )}
-                </div>
-                
-                {/* Phaser Status */}
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-orange-400 w-16">Phasers</span>
-                  <div className="flex-1 h-2 bg-gray-800 rounded overflow-hidden">
-                    <div 
-                      className={`h-full transition-all ${weaponsState.phaserOverheated ? 'bg-red-500' : 'bg-orange-500'}`}
-                      style={{ width: `${weaponsState.phaserCharge}%` }}
-                    />
-                  </div>
-                  <span className="text-gray-500 w-8">{weaponsState.phaserCharge.toFixed(0)}%</span>
-                </div>
-                
-                {/* Torpedo Status */}
-                <div className="flex items-center gap-2">
-                  <span className="text-red-400 w-16">Torpedos</span>
-                  <span className="text-white">{weaponsState.torpedoCount}</span>
-                  <span className="text-gray-500">/ 64</span>
-                  {weaponsState.torpedoReloading && (
-                    <span className="text-yellow-500 ml-2">LOADING</span>
-                  )}
-                </div>
-                
-                {/* Weapons disabled warning */}
-                {!weaponsState.weaponsEnabled && (
-                  <div className="text-red-500 mt-2 animate-pulse">WEAPONS OFFLINE</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Shield Status HUD */}
-          {shields && warpState === 'idle' && (
-            <div className="fixed bottom-24 left-4 z-30">
-              <div className={`bg-black/60 backdrop-blur-sm border ${alertColors[alertLevel]} rounded-lg p-3 font-mono text-xs`}>
-                <div className="text-gray-400 uppercase tracking-wider mb-2">Defenses</div>
-                
-                {/* Hull Integrity */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-gray-400 w-16">Hull</span>
-                  <div className="flex-1 h-2 bg-gray-800 rounded overflow-hidden">
-                    <div 
-                      className={`h-full transition-all ${hullIntegrity < 50 ? 'bg-red-500' : hullIntegrity < 80 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                      style={{ width: `${hullIntegrity}%` }}
-                    />
-                  </div>
-                  <span className="text-gray-500 w-8">{hullIntegrity.toFixed(0)}%</span>
-                </div>
-                
-                {/* Shield Quadrants */}
-                <div className="grid grid-cols-2 gap-1 text-[10px]">
-                  <div className="flex justify-between">
-                    <span className="text-cyan-500">FWD</span>
-                    <span className={shields.front < 30 ? 'text-red-400' : 'text-cyan-400'}>{shields.front.toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-cyan-500">AFT</span>
-                    <span className={shields.rear < 30 ? 'text-red-400' : 'text-cyan-400'}>{shields.rear.toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-cyan-500">PORT</span>
-                    <span className={shields.port < 30 ? 'text-red-400' : 'text-cyan-400'}>{shields.port.toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-cyan-500">STBD</span>
-                    <span className={shields.starboard < 30 ? 'text-red-400' : 'text-cyan-400'}>{shields.starboard.toFixed(0)}%</span>
-                  </div>
-                </div>
-                
-                {/* Alert Status */}
-                {alertLevel !== 'green' && (
-                  <div className={`mt-2 text-center ${alertLevel === 'red' ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`}>
-                    {alertLevel.toUpperCase()} ALERT
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Radar Display */}
           <RadarDisplay
             shipPosition={currentPositionRef.current}
-            targetId={weaponsState?.targetId}
-            visible={showRadar && warpState === 'idle' && !isBridgeMode}
+            visible={showRadar && warpState === 'idle'}
             range={500}
           />
 
-          {/* Helm Console - Toggleable, only in flight mode and not during warp */}
-          {showHelmConsole && cameraMode.mode === 'flight' && warpState === 'idle' && !isBridgeMode && (
+          {/* Helm Console - Toggleable, hidden during warp by default unless H is pressed */}
+          {showHelmConsole && cameraMode.mode === 'flight' && (
             <HelmConsole
               flightState={flightState}
               warpLevel={warpLevel}
@@ -638,6 +561,13 @@ export default function Home() {
               eta={eta}
             />
           )}
+
+          {/* Scanner Display with Inspection Actions */}
+          <ScannerDisplay 
+            scannerState={scannerState} 
+            onEnterOrbit={handleEnterOrbit}
+            onInspect={handleInspect}
+          />
 
           {/* Destination Selector Modal */}
           <DestinationSelector
@@ -682,17 +612,11 @@ export default function Home() {
                     <div className="text-gray-500">T</div><div className="text-white">Skip to Destination</div>
                     <div className="text-gray-500">X</div><div className="text-white">Emergency Stop</div>
                     
-                    <div className="text-gray-400 mt-4">Weapons</div>
+                    <div className="text-gray-400 mt-4">Camera</div>
                     <div></div>
-                    <div className="text-gray-500">P (hold)</div><div className="text-white">Fire Phasers</div>
-                    <div className="text-gray-500">G</div><div className="text-white">Fire Torpedo</div>
-                    <div className="text-gray-500">N</div><div className="text-white">Select Target</div>
-                    
-                                    <div className="text-gray-400 mt-4">Camera</div>
-                                    <div></div>
-                                    <div className="text-gray-500">I</div><div className="text-white">Inspect Mode (360 view)</div>
-                                    <div className="text-gray-500">C</div><div className="text-white">Cycle Camera Mode</div>
-                                    <div className="text-gray-500">Shift+P</div><div className="text-white">Photo Mode</div>
+                    <div className="text-gray-500">I</div><div className="text-white">Inspect Mode (360 view)</div>
+                    <div className="text-gray-500">C</div><div className="text-white">Cycle Camera Mode</div>
+                    <div className="text-gray-500">Shift+P</div><div className="text-white">Photo Mode</div>
                     
                     <div className="text-gray-400 mt-4">Interface</div>
                     <div></div>
@@ -712,12 +636,17 @@ export default function Home() {
             )}
           </AnimatePresence>
 
-          <CornerDecorations />
+          {/* System Readout */}
+          <SystemReadout 
+             cameraMode={cameraMode.mode} 
+             warpState={warpState}
+             weaponsState={weaponsState}
+          />
 
           {/* Keyboard Indicator - show when actively flying */}
-          <KeyboardIndicator 
-            keys={keyboardState} 
-            visible={cameraMode.mode === 'flight' && warpState === 'idle' && !showHelmConsole && !isBridgeMode}
+          <KeyboardIndicator
+            keys={keyboardState}
+            visible={cameraMode.mode === 'flight' && warpState === 'idle' && !showHelmConsole}
             compact
           />
 
@@ -725,14 +654,12 @@ export default function Home() {
           <div className="fixed top-20 right-4 text-gray-500 text-[10px] font-mono z-30 space-y-1 text-right">
             <div><kbd className="text-cyan-500/50">WASD</kbd> Flight Controls</div>
             <div><kbd className="text-cyan-500/50">SPACE</kbd> Engage Warp</div>
-            <div><kbd className="text-orange-500/50">P</kbd> Phasers <kbd className="text-red-500/50">G</kbd> Torpedos</div>
-            <div><kbd className="text-cyan-500/50">N</kbd> Target <kbd className="text-cyan-500/50">V</kbd> Navigation</div>
+            <div><kbd className="text-cyan-500/50">V</kbd> Navigation</div>
             <div><kbd className="text-cyan-500/50">1-9</kbd> Warp <kbd className="text-cyan-500/50">R</kbd> Radar {showRadar ? '(ON)' : '(OFF)'}</div>
             <div><kbd className="text-cyan-500/50">I</kbd> Inspect <kbd className="text-cyan-500/50">C</kbd> Camera</div>
             <div><kbd className="text-cyan-500/50">O</kbd> Orbits {showOrbitLines ? '(ON)' : '(OFF)'} <kbd className="text-cyan-500/50">Shift+P</kbd> Photo</div>
             <div><kbd className="text-cyan-500/50">H</kbd> Helm <kbd className="text-cyan-500/50">?</kbd> Help</div>
             <div><kbd className="text-cyan-500/50">M</kbd> Audio {audioEnabled ? '(ON)' : '(OFF)'}</div>
-             <div><kbd className="text-cyan-500/50">B</kbd> Bridge Mode</div>
           </div>
 
           {/* Camera Mode Indicator */}
@@ -747,10 +674,10 @@ export default function Home() {
                 <div className="text-cyan-400 font-bold text-sm tracking-wider">
                   {getCameraModeDisplayName(cameraMode.mode)}
                 </div>
-                                <div className="text-gray-400 text-xs mt-1">
-                                  {cameraMode.mode === 'freeLook' && 'Drag to rotate | Scroll to zoom | I or H to exit'}
-                                  {cameraMode.mode === 'cinematic' && 'Auto-orbiting camera | C or H to return'}
-                                </div>
+                <div className="text-gray-400 text-xs mt-1">
+                  {cameraMode.mode === 'freeLook' && 'Drag to rotate | Scroll to zoom | I or H to exit'}
+                  {cameraMode.mode === 'cinematic' && 'Auto-orbiting camera | C or H to return'}
+                </div>
               </div>
             </motion.div>
           )}

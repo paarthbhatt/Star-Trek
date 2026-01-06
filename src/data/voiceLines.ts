@@ -35,6 +35,18 @@ export const WARP_LINES: Record<string, VoiceLine> = {
     category: 'navigation',
     priority: 'medium',
   },
+  calculatingRoute: {
+    id: 'calculating-route',
+    text: 'Calculating warp trajectory.',
+    category: 'navigation',
+    priority: 'medium',
+  },
+  astrometricsOpen: {
+    id: 'astrometrics-open',
+    text: 'Astrometrics display active.',
+    category: 'navigation',
+    priority: 'low',
+  },
   braceForAcceleration: {
     id: 'brace-acceleration',
     text: 'Brace for acceleration.',
@@ -43,7 +55,7 @@ export const WARP_LINES: Record<string, VoiceLine> = {
   },
   warpEngage: {
     id: 'warp-engage',
-    text: 'Engaging warp drive.',
+    text: 'Engage.',
     category: 'warp',
     priority: 'high',
   },
@@ -55,7 +67,7 @@ export const WARP_LINES: Record<string, VoiceLine> = {
   },
   arrivalDestination: {
     id: 'arrival-destination',
-    text: 'Arrived at destination. All stop.',
+    text: 'Arrived at destination. Orbit established.',
     category: 'navigation',
     priority: 'high',
   },

@@ -1,3 +1,4 @@
+
 'use client';
 
 import { Suspense, useRef, useEffect, useCallback, useState, useMemo } from 'react';
@@ -7,29 +8,27 @@ import * as THREE from 'three';
 import { Enterprise } from './enterprise/Enterprise';
 import { SpaceEnvironment } from './environment/SpaceEnvironment';
 import { PostProcessing } from './effects/PostProcessing';
-import { WarpBubble, WarpFlash, WarpTunnel } from './effects/WarpBubble';
+import { WarpBubble, WarpFlash } from './effects/WarpBubble';
 import { WarpStreaks } from './effects/WarpStreaks';
-import { DestructiblePlanet } from './environment/DestructiblePlanet';
-import { PlanetExplosion } from './environment/PlanetExplosion';
-import { DebrisField } from './environment/DebrisField';
+import { DetailedPlanet } from './environment/planets/DetailedPlanet';
 import { Spacedock, DeepSpaceStation } from './environment/SpaceStations';
 import { OrbitLines } from './environment/OrbitLines';
-import { PhaserBeam } from './weapons/PhaserBeam';
-import { PhotonTorpedoes } from './weapons/PhotonTorpedo';
+import { Explosion } from './effects/Explosion'; // Import Explosion
 import { useFlightControls, FlightState } from '@/hooks/useFlightControls';
 import { useWarpDrive, WarpState } from '@/hooks/useWarpDrive';
-import { useWeapons, WeaponsState, PlanetTarget } from '@/hooks/useWeapons';
-import { usePlanetHealth, PlanetHealth } from '@/hooks/usePlanetHealth';
 import { useShipSystems, ShieldState } from '@/hooks/useShipSystems';
+import { useScanner, ScannerState } from '@/hooks/useScanner';
 import { useAudio } from '@/hooks/useAudio';
+import { useGameState } from '@/hooks/useGameState';
 import { useAnnouncements } from '@/hooks/useAnnouncements';
 import { WARP_LINES } from '@/data/voiceLines';
 import { DESTINATIONS, Destination } from '@/data/destinations';
 import { ShipComponent } from '@/types';
 import { CameraMode } from '@/hooks/useCameraMode';
 import { QualitySettings } from '@/hooks/useSettings';
-
-import { Bridge } from './bridge/Bridge';
+import { WeaponTarget } from '@/hooks/useWeapons';
+import { PhotonTorpedo } from '@/components/weapons/PhotonTorpedo';
+import { EnemyShip } from '@/components/enemies/EnemyShip';
 
 interface SceneProps {
   onSelectComponent: (component: ShipComponent) => void;
@@ -37,33 +36,44 @@ interface SceneProps {
   onHoverComponent: (component: ShipComponent | null) => void;
   onFlightStateUpdate?: (state: FlightState) => void;
   onWarpStateUpdate?: (state: WarpState, warpLevel: number, destination: Destination | null) => void;
-  onWeaponsStateUpdate?: (state: WeaponsState) => void;
   onShipSystemsUpdate?: (shields: ShieldState, hullIntegrity: number, alertLevel: 'green' | 'yellow' | 'red') => void;
+  onScannerUpdate?: (state: ScannerState) => void;
   onPlanetDestroyed?: (planetName: string) => void;
   onPlanetClick?: (destination: Destination) => void;
   flightEnabled?: boolean;
   cameraMode?: CameraMode;
   isOrbitEnabled?: boolean;
-  isBridgeMode?: boolean;
   selectedDestination?: Destination | null;
   warpLevel?: number;
   audioEnabled?: boolean;
-  phaserFiring?: boolean;
-  torpedoFired?: boolean;
-  targetNext?: boolean;
   showOrbitLines?: boolean;
   qualitySettings?: QualitySettings;
+  // Combat Props
+  torpedoes?: { id: string; position: THREE.Vector3; targetPosition: THREE.Vector3 }[];
+  enemies?: WeaponTarget[];
+  onTorpedoImpact?: (id: string) => void;
+  onUpdateWeapons?: (delta: number) => void;
 }
+
+// Reusable vectors to avoid GC
+const _shipPos = new THREE.Vector3();
+const _shipQuat = new THREE.Quaternion();
+const _camOffset = new THREE.Vector3();
+const _lookAhead = new THREE.Vector3();
+const _targetPos = new THREE.Vector3();
+const _lookAtPos = new THREE.Vector3();
 
 // Chase camera that follows behind the ship - smooth third-person view
 function ChaseCamera({ 
   target, 
   enabled = true,
   warpState = 'idle' as WarpState,
+  shakeIntensity = 0
 }: { 
   target: React.RefObject<THREE.Group | null>;
   enabled?: boolean;
   warpState?: WarpState;
+  shakeIntensity?: number;
 }) {
   const { camera } = useThree();
   const currentLookAt = useRef(new THREE.Vector3(0, 0, 0));
@@ -81,27 +91,43 @@ function ChaseCamera({
     }
   };
 
-  useFrame(() => {
+  useFrame((state, delta) => {
     if (!target.current || !enabled) return;
 
-    const shipPos = new THREE.Vector3();
-    const shipQuat = new THREE.Quaternion();
-    target.current.getWorldPosition(shipPos);
-    target.current.getWorldQuaternion(shipQuat);
+    target.current.getWorldPosition(_shipPos);
+    target.current.getWorldQuaternion(_shipQuat);
 
     const dampingFactor = getDampingFactor();
     
     // Camera offset in ship's local space - behind and above
     // Ship faces -Z (forward), so camera should be at +Z (behind)
-    const offset = new THREE.Vector3(0, 1.2, 4.0);
-    const desiredPos = offset.clone().applyQuaternion(shipQuat).add(shipPos);
+    _camOffset.set(0, 0.7, 2.5);
     
-    // Look-ahead point - in front of ship
-    const lookAhead = new THREE.Vector3(0, 0.3, -8.0).applyQuaternion(shipQuat).add(shipPos);
+    // Calculate desired position
+    // We hard-lock the distance to avoid "shrinking" effect (drag)
+    // But we still smooth the rotation for cinematic feel
     
-    // Smooth camera movement
-    currentPosition.current.lerp(desiredPos, dampingFactor);
-    currentLookAt.current.lerp(lookAhead, dampingFactor);
+    // 1. Get the target position immediately (hard lock)
+    let targetPos = _camOffset.clone().applyQuaternion(_shipQuat).add(_shipPos);
+    
+    // Apply Shake
+    if (shakeIntensity > 0) {
+        const shake = new THREE.Vector3(
+            (Math.random() - 0.5) * shakeIntensity,
+            (Math.random() - 0.5) * shakeIntensity,
+            (Math.random() - 0.5) * shakeIntensity
+        );
+        targetPos.add(shake);
+    }
+
+    // 2. Smoothly interpolate current position towards target position
+    // BUT we need to be very aggressive to prevent shrinking
+    // For translation, we want to be almost instant
+    currentPosition.current.lerp(targetPos, 0.2); // Very fast lerp
+    
+    // 3. For rotation (lookAt), we can be smoother
+    _lookAhead.set(0, 0.3, -8.0).applyQuaternion(_shipQuat).add(_shipPos);
+    currentLookAt.current.lerp(_lookAhead, dampingFactor * 2.0);
     
     camera.position.copy(currentPosition.current);
     camera.lookAt(currentLookAt.current);
@@ -124,8 +150,7 @@ function CinematicCamera({
     if (!target.current) return;
     
     // Get ship position
-    const shipPos = new THREE.Vector3();
-    target.current.getWorldPosition(shipPos);
+    target.current.getWorldPosition(_shipPos);
     
     // Slowly orbit around the ship
     angleRef.current += delta * 0.2; // Slow rotation
@@ -136,17 +161,17 @@ function CinematicCamera({
     const height = 2.0 + Math.sin(time * 0.15) * 1.0;
     
     // Calculate camera position
-    const x = shipPos.x + Math.cos(angleRef.current) * radius;
-    const y = shipPos.y + height;
-    const z = shipPos.z + Math.sin(angleRef.current) * radius;
+    const x = _shipPos.x + Math.cos(angleRef.current) * radius;
+    const y = _shipPos.y + height;
+    const z = _shipPos.z + Math.sin(angleRef.current) * radius;
     
     // Smooth camera movement
-    const targetPos = new THREE.Vector3(x, y, z);
-    currentPosition.current.lerp(targetPos, delta * 2);
+    _targetPos.set(x, y, z);
+    currentPosition.current.lerp(_targetPos, delta * 2);
     camera.position.copy(currentPosition.current);
     
     // Always look at ship
-    camera.lookAt(shipPos);
+    camera.lookAt(_shipPos);
   });
   
   return null;
@@ -181,93 +206,104 @@ function WarpCinematicCamera({
     const phaseTime = state.clock.elapsedTime - phaseStartTime.current;
     
     // Get ship position and orientation
-    const shipPos = new THREE.Vector3();
-    const shipQuat = new THREE.Quaternion();
-    target.current.getWorldPosition(shipPos);
-    target.current.getWorldQuaternion(shipQuat);
-    
-    let targetPos: THREE.Vector3;
-    let lookAtPos: THREE.Vector3;
+    target.current.getWorldPosition(_shipPos);
+    target.current.getWorldQuaternion(_shipQuat);
     
     switch (warpState) {
       case 'charging':
-        // Dramatic side angle, slowly orbiting
-        angleRef.current += delta * 0.3;
-        const chargeRadius = 6.0;
-        const chargeHeight = 1.5 + Math.sin(phaseTime * 0.5) * 0.5;
-        targetPos = new THREE.Vector3(
-          shipPos.x + Math.cos(angleRef.current) * chargeRadius,
-          shipPos.y + chargeHeight,
-          shipPos.z + Math.sin(angleRef.current) * chargeRadius
+        // Mild side drift, but mostly rear view
+        angleRef.current += delta * 0.1; // Slower drift
+        const chargeRadius = 5.0;
+        // Clamp orbit angle to rear arc (PI to 2PI, or similar range behind ship)
+        // We want angles around 3PI/2 (270 deg) which is directly behind if 0 is right?
+        // Actually in our setup: +Z is behind. So angle 0 is +X (Right), PI/2 is +Z (Behind), PI is -X (Left), 3PI/2 is -Z (Front)
+        // Let's keep it simple: Oscillate between slightly left and slightly right of rear (+Z)
+        
+        const baseRearAngle = Math.PI / 2;
+        const drift = Math.sin(phaseTime * 0.5) * 0.5; // +/- 0.5 radians (approx 30 deg)
+        const finalAngle = baseRearAngle + drift;
+
+        const chargeHeight = 1.5 + Math.sin(phaseTime * 0.5) * 0.3;
+        
+        _targetPos.set(
+          _shipPos.x + Math.cos(finalAngle) * chargeRadius,
+          _shipPos.y + chargeHeight,
+          _shipPos.z + Math.sin(finalAngle) * chargeRadius
         );
-        lookAtPos = shipPos.clone();
+        _lookAtPos.copy(_shipPos);
         break;
         
       case 'accelerating':
-        // Pull back dramatically as ship stretches into warp
+        // Pull back dramatically strictly behind
         const accelProgress = Math.min(phaseTime / 1.0, 1.0);
         const pullBack = 4.0 + accelProgress * 8.0;
-        const accelOffset = new THREE.Vector3(1.5, 2.0, pullBack);
-        targetPos = accelOffset.applyQuaternion(shipQuat).add(shipPos);
+        _camOffset.set(0, 2.0, pullBack); // Strictly behind (+Z)
+        _targetPos.copy(_camOffset).applyQuaternion(_shipQuat).add(_shipPos);
         // Look slightly ahead of ship
-        lookAtPos = new THREE.Vector3(0, 0, -5).applyQuaternion(shipQuat).add(shipPos);
+        _lookAhead.set(0, 0, -5).applyQuaternion(_shipQuat).add(_shipPos);
+        _lookAtPos.copy(_lookAhead);
         break;
         
       case 'cruising':
-        // Dynamic camera during cruise - orbit and vary distance
+        // Dynamic camera during cruise - gentle wobble behind ship
         angleRef.current += delta * 0.15;
         const cruiseTime = state.clock.elapsedTime;
+        
+        // Strictly constrained orbit behind ship
+        const cruiseRearAngle = Math.PI / 2;
+        const cruiseDrift = Math.sin(cruiseTime * 0.2) * 0.8; // Wider drift but staying behind
+        const cruiseCurrentAngle = cruiseRearAngle + cruiseDrift;
+
         const cruiseRadius = 5.0 + Math.sin(cruiseTime * 0.2) * 2.0;
         const cruiseHeight = 1.5 + Math.sin(cruiseTime * 0.3) * 1.0;
         
-        // Mix between side view and behind view
-        const behindOffset = new THREE.Vector3(0, cruiseHeight, cruiseRadius);
-        const sideOffset = new THREE.Vector3(
-          Math.cos(angleRef.current) * cruiseRadius,
-          cruiseHeight,
-          Math.sin(angleRef.current) * cruiseRadius
+        _targetPos.set(
+          _shipPos.x + Math.cos(cruiseCurrentAngle) * cruiseRadius,
+          _shipPos.y + cruiseHeight,
+          _shipPos.z + Math.sin(cruiseCurrentAngle) * cruiseRadius
         );
         
-        // Interpolate between positions based on time
-        const mixFactor = (Math.sin(cruiseTime * 0.1) + 1) * 0.5;
-        targetPos = behindOffset.clone().applyQuaternion(shipQuat).add(shipPos);
-        targetPos.lerp(sideOffset.add(shipPos), mixFactor * 0.3);
-        lookAtPos = shipPos.clone();
+        _lookAtPos.copy(_shipPos);
         break;
         
       case 'decelerating':
-        // Swing around to front as ship drops out
+        // Return to standard chase position
         const decelProgress = Math.min(phaseTime / 1.2, 1.0);
-        const frontAngle = Math.PI * decelProgress;
         const decelRadius = 6.0 - decelProgress * 2.0;
-        const decelOffset = new THREE.Vector3(
-          Math.sin(frontAngle) * 2.0,
+        
+        // Stay behind
+        _camOffset.set(
+          0,
           1.5,
           decelRadius
         );
-        targetPos = decelOffset.applyQuaternion(shipQuat).add(shipPos);
-        lookAtPos = shipPos.clone();
+        _targetPos.copy(_camOffset).applyQuaternion(_shipQuat).add(_shipPos);
+        _lookAtPos.copy(_shipPos);
         break;
         
       case 'arriving':
         // Settle behind ship looking at destination
-        const arriveOffset = new THREE.Vector3(0, 1.5, 5.0);
-        targetPos = arriveOffset.applyQuaternion(shipQuat).add(shipPos);
+        _camOffset.set(0, 1.5, 5.0);
+        _targetPos.copy(_camOffset).applyQuaternion(_shipQuat).add(_shipPos);
         // Look past ship at destination
-        lookAtPos = new THREE.Vector3(0, 0, -10).applyQuaternion(shipQuat).add(shipPos);
+        _lookAhead.set(0, 0, -10).applyQuaternion(_shipQuat).add(_shipPos);
+        _lookAtPos.copy(_lookAhead);
         break;
         
       default:
         // Fallback to behind ship
-        const defaultOffset = new THREE.Vector3(0, 1.2, 4.0);
-        targetPos = defaultOffset.applyQuaternion(shipQuat).add(shipPos);
-        lookAtPos = shipPos.clone();
+        _camOffset.set(0, 1.2, 4.0);
+        _targetPos.copy(_camOffset).applyQuaternion(_shipQuat).add(_shipPos);
+        _lookAtPos.copy(_shipPos);
     }
     
     // Smooth camera transitions
-    const smoothing = warpState === 'accelerating' ? 0.08 : 0.05;
-    currentPosition.current.lerp(targetPos, smoothing);
-    currentLookAt.current.lerp(lookAtPos, smoothing);
+    // During high-speed warp, snap to position to avoid camera lagging behind (ship moves too fast for lerp)
+    const isHighSpeed = warpState === 'accelerating' || warpState === 'cruising';
+    const smoothing = isHighSpeed ? 1.0 : 0.05;
+    
+    currentPosition.current.lerp(_targetPos, smoothing);
+    currentLookAt.current.lerp(_lookAtPos, smoothing);
     
     camera.position.copy(currentPosition.current);
     camera.lookAt(currentLookAt.current);
@@ -311,9 +347,8 @@ function OrbitControlsWrapper({
     if (frozenPosition) {
       controlsRef.current.target.copy(frozenPosition);
     } else if (shipRef.current) {
-      const shipPos = new THREE.Vector3();
-      shipRef.current.getWorldPosition(shipPos);
-      controlsRef.current.target.copy(shipPos);
+      shipRef.current.getWorldPosition(_shipPos);
+      controlsRef.current.target.copy(_shipPos);
     }
     controlsRef.current.update();
   });
@@ -345,7 +380,6 @@ function FlightWarpController({
   selectedDestination,
   warpLevel = 1,
   audioEnabled = true,
-  weaponsHook,
 }: {
   shipRef: React.RefObject<THREE.Group | null>;
   onFlightStateUpdate?: (state: FlightState) => void;
@@ -354,7 +388,6 @@ function FlightWarpController({
   selectedDestination?: Destination | null;
   warpLevel?: number;
   audioEnabled?: boolean;
-  weaponsHook: ReturnType<typeof useWeapons>;
 }) {
   const lastImpulseRef = useRef(0);
   const targetQuaternion = useRef(new THREE.Quaternion());
@@ -390,37 +423,33 @@ function FlightWarpController({
       // Play appropriate sounds
       switch (newState) {
         case 'charging':
-          audio.playWarpCharge();
+          audio.playSound('warpCharge');
           announcements.announce(WARP_LINES.warpCharging);
-          // Disable weapons during warp
-          weaponsHook.setWeaponsEnabled(false);
           // Reset alignment and announcement flags when starting new warp
           hasAlignedToDestination.current = false;
           hasAnnouncedBrace.current = false;
           break;
         case 'accelerating':
-          audio.playWarpEngage();
+          audio.playSound('warpEngage');
           announcements.announce(WARP_LINES.warpEngage);
           break;
         case 'cruising':
-          audio.playWarpCruise(warpLevel);
+          audio.playSound('warpCruise', warpLevel);
           break;
         case 'decelerating':
         case 'arriving':
-          audio.playWarpDisengage();
+          audio.playSound('warpDisengage');
           announcements.announce(WARP_LINES.warpDisengage);
           break;
         case 'idle':
           if (prevState !== 'idle') {
-            audio.playEngineIdle();
-            // Re-enable weapons after warp
-            weaponsHook.setWeaponsEnabled(true);
+            audio.playSound('engineIdle');
           }
           break;
       }
     },
     onArrival: () => {
-      audio.playUIConfirm();
+      audio.playSound('uiConfirm');
       announcements.announce(WARP_LINES.arrivalDestination);
     },
   });
@@ -472,14 +501,15 @@ function FlightWarpController({
         const shipPos = new THREE.Vector3();
         shipRef.current.getWorldPosition(shipPos);
         
-        // Direction to destination
-        const direction = warpDriveState.destination.clone().sub(shipPos).normalize();
-        
         // Create rotation that points ship's forward (-Z local) toward destination
-        // Since ship model faces -Z, we need to look in the opposite direction
-        const lookAtPoint = shipPos.clone().sub(direction);
+        // Since ship model faces -Z, we want -Z to point at destination
+        // Standard lookAt makes +Z point at target.
+        // So we look at a point BEHIND the ship relative to destination to make +Z point AWAY.
+        const directionToDest = new THREE.Vector3().subVectors(warpDriveState.destination, shipPos);
+        const lookAtTarget = new THREE.Vector3().subVectors(shipPos, directionToDest);
+        
         const lookAtMatrix = new THREE.Matrix4();
-        lookAtMatrix.lookAt(shipPos, lookAtPoint, new THREE.Vector3(0, 1, 0));
+        lookAtMatrix.lookAt(shipPos, lookAtTarget, new THREE.Vector3(0, 1, 0));
         targetQuaternion.current.setFromRotationMatrix(lookAtMatrix);
       }
       
@@ -496,8 +526,11 @@ function FlightWarpController({
           
           // Announce "Brace for acceleration" once aligned
           if (!hasAnnouncedBrace.current && warpDriveState.stateTime > 1.0) {
-            announcements.announceImmediate(WARP_LINES.braceForAcceleration);
-            hasAnnouncedBrace.current = true;
+             // Only announce if audio is enabled
+             if(audioEnabled) {
+                 announcements.announceImmediate(WARP_LINES.braceForAcceleration);
+             }
+             hasAnnouncedBrace.current = true;
           }
         }
       }
@@ -524,34 +557,70 @@ function FlightWarpController({
         setWarping(false);
         hasAlignedToDestination.current = false;
         
-        // Sync flight state rotation with ship's final orientation
-        const euler = new THREE.Euler().setFromQuaternion(shipRef.current.quaternion);
-        const flightState = getState();
-        flightState.rotation.copy(euler);
-        flightState.quaternion.copy(shipRef.current.quaternion);
+        // Get final position and destination center
+        const shipPos = new THREE.Vector3();
+        shipRef.current.getWorldPosition(shipPos);
+        
+        const destinationCenter = warpDriveState.destinationCenter;
+        if (destinationCenter) {
+          // Calculate direction to destination
+          const toDestination = new THREE.Vector3()
+            .subVectors(destinationCenter, shipPos)
+            .normalize();
+          
+          // Calculate pitch angle (vertical)
+          // Y is up, so asin(y) gives pitch
+          const pitch = Math.asin(toDestination.y);
+          
+          // Calculate yaw angle (horizontal)
+          const yaw = Math.atan2(toDestination.x, toDestination.z);
+          
+          // Create rotation that points ship's forward (-Z) at target
+          // Standard rotation is 0,0,0 facing +Z? No, three.js default is +Z
+          // Our ship faces -Z. 
+          // If yaw is 0, we face +Z. If we want to face -Z, we need yaw + PI.
+          // Let's use lookAt matrix to be safe.
+          
+          const matrix = new THREE.Matrix4();
+          matrix.lookAt(shipPos, destinationCenter, new THREE.Vector3(0, 1, 0));
+          const quaternion = new THREE.Quaternion().setFromRotationMatrix(matrix);
+          const euler = new THREE.Euler().setFromQuaternion(quaternion);
+          
+          // Ensure level roll
+          euler.z = 0;
+          
+          // Sync flight state
+          const flightState = getState();
+          flightState.rotation.copy(euler);
+          flightState.quaternion.setFromEuler(euler);
+          shipRef.current.quaternion.copy(flightState.quaternion);
+        } else {
+             // Fallback if no destination center
+             const euler = new THREE.Euler().setFromQuaternion(shipRef.current.quaternion);
+             euler.z = 0;
+             const flightState = getState();
+             flightState.rotation.copy(euler);
+             flightState.quaternion.setFromEuler(euler);
+             shipRef.current.quaternion.copy(flightState.quaternion);
+        }
       }
     }
     
-    // Engine sound based on impulse - with debouncing to prevent rapid retriggering
+    // Engine sound based on impulse - smooth updates now handled by audio engine
     const impulsePercent = flightState.impulsePercent;
     if (!isWarping) {
-      // Only update engine sound on significant changes (>20% difference) to prevent rapid retriggering
-      if (impulsePercent > 5 && lastImpulseRef.current <= 5) {
-        audio.playEngineImpulse(impulsePercent / 100);
-      } else if (impulsePercent <= 5 && lastImpulseRef.current > 5) {
-        audio.playEngineIdle();
-      } else if (impulsePercent > 5 && Math.abs(impulsePercent - lastImpulseRef.current) > 20) {
-        // Only update if change is significant enough (was 10, now 20)
-        audio.playEngineImpulse(impulsePercent / 100);
+      if (impulsePercent > 5) {
+        audio.playSound('engineImpulse', impulsePercent / 100);
+      } else if (lastImpulseRef.current > 5) {
+        audio.playSound('engineIdle');
       }
       lastImpulseRef.current = impulsePercent;
     }
     
-    // Update ship position and rotation for weapons system
+    // Update ship position and rotation for systems that need it
     if (shipRef.current) {
       const shipQuat = new THREE.Quaternion();
       shipRef.current.getWorldQuaternion(shipQuat);
-      weaponsHook.updateShipPosition(flightState.position, shipQuat);
     }
     
     if (onFlightStateUpdate) {
@@ -578,6 +647,7 @@ function WarpEffects({
 
   // Trigger flash on warp state changes
   useEffect(() => {
+    // Flash on entry (accelerating) and exit (decelerating)
     if (warpState === 'accelerating' || warpState === 'decelerating') {
       setShowFlash(true);
     }
@@ -587,26 +657,20 @@ function WarpEffects({
 
   return (
     <group>
-      {/* Warp bubble around ship */}
+      {/* Warp bubble around ship - visible membrane distortion */}
       <WarpBubble
         warpState={warpState}
         warpLevel={warpLevel}
         visible={isWarpActive}
       />
       
-      {/* Star streaks during warp */}
+      {/* Star streaks during warp - "Rain" effect */}
       <WarpStreaks
         warpState={warpState}
         warpLevel={warpLevel}
       />
       
-      {/* Warp tunnel particles */}
-      <WarpTunnel
-        warpState={warpState}
-        warpLevel={warpLevel}
-      />
-      
-      {/* Flash effect */}
+      {/* Flash effect on transition */}
       <WarpFlash
         active={showFlash}
         onComplete={() => setShowFlash(false)}
@@ -621,22 +685,22 @@ function SceneContent({
   onHoverComponent,
   onFlightStateUpdate,
   onWarpStateUpdate,
-  onWeaponsStateUpdate,
   onShipSystemsUpdate,
+  onScannerUpdate,
   onPlanetDestroyed,
   onPlanetClick,
   flightEnabled = true,
   cameraMode: cameraModeFromProps = 'flight',
   isOrbitEnabled = false,
-  isBridgeMode = false,
   selectedDestination,
   warpLevel = 1,
   audioEnabled = true,
-  phaserFiring = false,
-  torpedoFired = false,
-  targetNext = false,
   showOrbitLines = false,
   qualitySettings,
+  torpedoes = [],
+  enemies = [],
+  onTorpedoImpact,
+  onUpdateWeapons,
 }: SceneProps) {
   const shipRef = useRef<THREE.Group>(null);
   // Use local camera state only for internal camera types (chase/cinematic), orbit is controlled by parent
@@ -647,120 +711,70 @@ function SceneContent({
   // Store frozen ship position when entering free look
   const frozenShipPosition = useRef<THREE.Vector3 | null>(null);
   
+  // Shake effect state
+  const [shakeIntensity, setShakeIntensity] = useState(0);
+  const [explosions, setExplosions] = useState<{ id: string; position: THREE.Vector3 }[]>([]); // Track explosions
+
+  // Decay shake
+  useFrame((_, delta) => {
+    if (shakeIntensity > 0) {
+        setShakeIntensity(prev => Math.max(0, prev - delta * 2)); // Decay over time
+    }
+  });
+
   // Check if we're in any warp phase (for cinematic camera)
   const isWarping = currentWarpState !== 'idle';
   
   const audio = useAudio(audioEnabled);
-
-  // Planet health system
-  const planetHealth = usePlanetHealth({
-    respawnTime: 120000, // 2 minutes
-    onPlanetDestroyed: (planetId, planetName) => {
-      audio.playPlanetExplode();
-      if (onPlanetDestroyed) {
-        onPlanetDestroyed(planetName);
-      }
-      // Clear weapon target when planet destroyed
-      weapons.handleTargetDestroyed(planetId);
-    },
-    onPlanetRespawned: (planetId) => {
-      audio.playUIConfirm();
-    },
-  });
+  const announcements = useAnnouncements({ enabled: audioEnabled, voiceEnabled: audioEnabled });
 
   // Ship systems (shields, etc.)
   const shipSystems = useShipSystems({
     shieldRechargeRate: 2,
     shieldDamageTimeout: 3000,
     onShieldsDown: () => {
-      audio.playUIAlert();
+      audio.playSound('uiAlert');
     },
     onHullDamage: () => {
-      audio.playShieldHit();
+      audio.playSound('shieldHit');
     },
   });
 
-  // Weapons system
-  const weapons = useWeapons({
-    onPhaserHit: (targetId, damage) => {
-      planetHealth.damagePlanet(targetId, damage);
-      // Play damage sound occasionally
-      if (Math.random() < 0.1) {
-        audio.playPlanetDamage();
-      }
-    },
-    onTorpedoHit: (targetId, torpedoId) => {
-      planetHealth.damagePlanet(targetId, 10); // 10 damage per torpedo
-      audio.playTorpedoImpact();
-      weapons.removeTorpedo(torpedoId);
-    },
-    onTargetDestroyed: (targetId) => {
-      audio.playTargetLock(); // Feedback sound
-    },
+  // Scanner system
+  const { scannerState, startScan, cancelScan, updateScanner } = useScanner({
+    onScanComplete: () => {
+      audio.playSound('uiConfirm');
+    }
   });
 
-  // Initialize planets in health system
+  // Handle Scan key 'K'
   useEffect(() => {
-    DESTINATIONS.forEach(dest => {
-      planetHealth.initPlanet(dest.id, dest.name, 100);
-    });
-  }, [planetHealth.initPlanet]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'k' && !isWarping) {
+        // No auto-target in peaceful mode, scan what's in front or selected
+        // For now just scan if something is selected or we're near something
+        // Simplified: toggle scanner
+        if (scannerState.isScanning) {
+          cancelScan();
+        } else {
+           // Scan closest planet
+           const closest = DESTINATIONS.reduce((prev, curr) => {
+              const d = shipPositionRef.current.distanceTo(curr.position);
+              return d < prev.dist ? { dist: d, dest: curr } : prev;
+           }, { dist: Infinity, dest: null as Destination | null });
 
-  // Update planets list for weapons targeting
-  useEffect(() => {
-    const planetTargets: PlanetTarget[] = DESTINATIONS.map(dest => {
-      const health = planetHealth.getPlanet(dest.id);
-      return {
-        id: dest.id,
-        name: dest.name,
-        position: dest.position,
-        radius: dest.radius,
-        destroyed: health ? planetHealth.isDestroyed(dest.id) : false,
-      };
-    });
-    weapons.updatePlanets(planetTargets);
-  }, [planetHealth.planets, weapons.updatePlanets, planetHealth.getPlanet, planetHealth.isDestroyed]);
-
-  // Handle phaser firing from props
-  const prevPhaserFiring = useRef(false);
-  useEffect(() => {
-    // Only act on changes
-    if (phaserFiring !== prevPhaserFiring.current) {
-      prevPhaserFiring.current = phaserFiring;
-      
-      if (phaserFiring) {
-        weapons.firePhasers();
-        if (weapons.state.targetId) {
-          audio.playPhaserFire();
+           if (closest.dest && closest.dist < 100) {
+             startScan(closest.dest, shipPositionRef.current);
+             audio.playSound('uiBeep');
+           } else {
+             audio.playSound('uiAlert');
+           }
         }
-      } else {
-        // Always stop phaser sound when P is released
-        audio.stopSound('phaser');
-        audio.playPhaserStop();
-        weapons.stopPhasers();
       }
-    }
-  }, [phaserFiring, weapons.state.targetId, audio, weapons]);
-
-  // Handle torpedo firing from props
-  useEffect(() => {
-    if (torpedoFired) {
-      const fired = weapons.fireTorpedo();
-      if (fired) {
-        audio.playTorpedoLaunch();
-      }
-    }
-  }, [torpedoFired]);
-
-  // Handle target selection from props
-  useEffect(() => {
-    if (targetNext) {
-      weapons.autoTarget();
-      if (weapons.state.targetId) {
-        audio.playTargetLock();
-      }
-    }
-  }, [targetNext]);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isWarping, startScan, cancelScan, scannerState.isScanning, audio]);
 
   // Update ship position ref for orbit controls target
   useFrame((_, delta) => {
@@ -768,23 +782,22 @@ function SceneContent({
       shipRef.current.getWorldPosition(shipPositionRef.current);
     }
     
-    // Update weapons system
-    weapons.update(delta);
-    
-    // Update planet health (explosion timers, etc.)
-    planetHealth.update(delta);
-    
     // Update ship systems (shield recharge, etc.)
     shipSystems.update(delta);
     
-    // Report weapons state
-    if (onWeaponsStateUpdate) {
-      onWeaponsStateUpdate(weapons.state);
-    }
+    // Update scanner
+    updateScanner(delta, shipPositionRef.current, null); // target null for now
     
-    // Report ship systems state
+    if (onScannerUpdate) {
+      onScannerUpdate(scannerState);
+    }
+
     if (onShipSystemsUpdate) {
       onShipSystemsUpdate(shipSystems.shields, shipSystems.hullIntegrity, shipSystems.alertLevel);
+    }
+    
+    if (onUpdateWeapons) {
+        onUpdateWeapons(delta);
     }
   });
 
@@ -831,66 +844,121 @@ function SceneContent({
   // Handle debris collision
   const handleDebrisCollision = useCallback(() => {
     shipSystems.handleDebrisCollision();
-    audio.playShieldHit();
+    audio.playSound('shieldHit');
   }, [shipSystems, audio]);
 
-  // Get phaser beam origin (bottom of saucer, near impulse engines)
-  const getPhaserOrigin = useCallback(() => {
-    if (!shipRef.current) return new THREE.Vector3();
-    const worldPos = new THREE.Vector3();
-    shipRef.current.getWorldPosition(worldPos);
-    // Offset to bottom center of saucer - scaled for tiny ship (0.01 scale)
-    const offset = new THREE.Vector3(0, -0.05, 0.4); 
-    const quat = new THREE.Quaternion();
-    shipRef.current.getWorldQuaternion(quat);
-    offset.applyQuaternion(quat);
-    return worldPos.add(offset);
-  }, []);
+  // Ambient Audio Logic
+  useFrame(() => {
+    if (!audioEnabled || isWarping) {
+        // Stop all ambience if warping or disabled
+        audio.stopSound('ambienceRumble');
+        audio.stopSound('ambienceEthereal');
+        audio.stopSound('ambienceStatic');
+        return;
+    }
+
+    // Find nearest destination
+    let nearestDist = Infinity;
+    let nearestDest: Destination | null = null;
+
+    const shipPos = shipPositionRef.current;
+
+    for (const dest of DESTINATIONS) {
+        const dist = shipPos.distanceTo(dest.position);
+        // Only consider it if it's reasonably close to save perf
+        if (dist < 500 && dist < nearestDist) {
+            nearestDist = dist;
+            nearestDest = dest;
+        }
+    }
+
+    // Logic for playing sound based on proximity
+    const maxRange = 300; // Audibility range
+    const minRange = 40;  // Full volume range (radius of planet + buffer)
+    
+    if (nearestDest && nearestDist < maxRange) {
+        // Calculate volume: 0 at maxRange, 0.4 at minRange
+        // Clamp normalized distance 0..1
+        const t = Math.max(0, Math.min(1, 1 - (nearestDist - minRange) / (maxRange - minRange)));
+        const volume = t * 0.4; // Max volume 0.4
+        
+        let soundType: 'ambienceRumble' | 'ambienceEthereal' | 'ambienceStatic' | null = null;
+        
+        // Map destination type to sound
+        if (nearestDest.type === 'star') {
+            soundType = 'ambienceRumble';
+        } else if (nearestDest.id === 'jupiter' || nearestDest.id === 'saturn' || nearestDest.id === 'uranus' || nearestDest.id === 'neptune') {
+             // Gas giants are classified as 'planet' in the data, so we check IDs or need a better way.
+             // Looking at data/destinations.ts, Jupiter etc are type 'planet'.
+             // Let's check IDs for gas giants.
+             soundType = 'ambienceRumble';
+        } else if (nearestDest.type === 'planet' || nearestDest.type === 'dwarf' || nearestDest.type === 'moon') {
+             soundType = 'ambienceEthereal';
+        } else if (nearestDest.type === 'station') {
+            soundType = 'ambienceStatic';
+        }
+
+        if (soundType && volume > 0.01) {
+             // Ensure this sound is playing and update volume
+             audio.playSound(soundType);
+             audio.updateSoundVolume(soundType, volume);
+             
+             // Stop others to prevent mud
+             if (soundType !== 'ambienceRumble') audio.stopSound('ambienceRumble');
+             if (soundType !== 'ambienceEthereal') audio.stopSound('ambienceEthereal');
+             if (soundType !== 'ambienceStatic') audio.stopSound('ambienceStatic');
+        } else {
+             // Volume too low, stop everything
+            audio.stopSound('ambienceRumble');
+            audio.stopSound('ambienceEthereal');
+            audio.stopSound('ambienceStatic');
+        }
+    } else {
+        // Too far, stop all
+        audio.stopSound('ambienceRumble');
+        audio.stopSound('ambienceEthereal');
+        audio.stopSound('ambienceStatic');
+    }
+  });
 
   return (
     <>
-      {isBridgeMode ? (
-        <>
-            <PerspectiveCamera makeDefault position={[0, 1.6, 0]} fov={75} />
-            <Bridge />
-        </>
-      ) : (
-        <>
-          {/* Camera */}
-          <PerspectiveCamera makeDefault position={[0, 1.2, 4.0]} fov={75} />
-          
-          {/* Warp Cinematic Camera - takes over during any warp phase */}
-          {isWarping && !isOrbitEnabled && (
-            <WarpCinematicCamera 
-              target={shipRef}
-              warpState={currentWarpState}
-              warpProgress={warpProgress}
-            />
-          )}
-          
-          {/* Chase Camera (when flight is enabled, not warping, and not in orbit/freeLook mode) */}
-          {flightEnabled && !isOrbitEnabled && !isWarping && internalCameraType === 'chase' && (
-            <ChaseCamera 
-              target={shipRef} 
-              enabled={true}
-              warpState={currentWarpState}
-            />
-          )}
-          
-          {/* Orbit Camera Controls - enabled when in freeLook or photo mode */}
-          {isOrbitEnabled && (
-            <OrbitControlsWrapper 
-              shipRef={shipRef}
-              frozenPosition={frozenShipPosition.current}
-            />
-          )}
-          
-          {/* Cinematic Camera - auto-orbiting (only in flight mode, not warping) */}
-          {!isOrbitEnabled && !isWarping && internalCameraType === 'cinematic' && (
-            <CinematicCamera target={shipRef} />
-          )}
+      {/* Camera */}
+      <PerspectiveCamera makeDefault position={[0, 1.2, 4.0]} fov={75} />
+      
+      {/* Warp Cinematic Camera - takes over during any warp phase */}
+      {isWarping && !isOrbitEnabled && (
+        <WarpCinematicCamera 
+          target={shipRef}
+          warpState={currentWarpState}
+          warpProgress={warpProgress}
+        />
+      )}
+      
+      {/* Chase Camera (when flight is enabled, not warping, and not in orbit/freeLook mode) */}
+      {flightEnabled && !isOrbitEnabled && !isWarping && internalCameraType === 'chase' && (
+        <ChaseCamera 
+          target={shipRef} 
+          enabled={true}
+          warpState={currentWarpState}
+          shakeIntensity={shakeIntensity}
+        />
+      )}
+      
+      {/* Orbit Camera Controls - enabled when in freeLook or photo mode */}
+      {isOrbitEnabled && (
+        <OrbitControlsWrapper 
+          shipRef={shipRef}
+          frozenPosition={frozenShipPosition.current}
+        />
+      )}
+      
+      {/* Cinematic Camera - auto-orbiting (only in flight mode, not warping) */}
+      {!isOrbitEnabled && !isWarping && internalCameraType === 'cinematic' && (
+        <CinematicCamera target={shipRef} />
+      )}
 
-          {/* Lighting */}
+      {/* Lighting */}
           <ambientLight intensity={0.5} />
           <directionalLight
             position={[50, 30, 20]}
@@ -911,6 +979,40 @@ function SceneContent({
 
           {/* Space Environment */}
           <SpaceEnvironment qualitySettings={qualitySettings} />
+          
+          {/* Enemies */}
+          {enemies.map((enemy) => (
+            <EnemyShip
+               key={enemy.id}
+               id={enemy.id}
+               position={enemy.position}
+               type={enemy.id.includes('romulan') ? 'warbird' : 'scout'}
+               health={enemy.health || 100}
+            />
+          ))}
+
+          {/* Explosions */}
+          {explosions.map((explosion) => (
+             <Explosion
+               key={explosion.id}
+               position={explosion.position}
+               onComplete={() => setExplosions(prev => prev.filter(e => e.id !== explosion.id))}
+             />
+          ))}
+
+          {/* Torpedoes */}
+          {torpedoes.map((torpedo) => (
+             <PhotonTorpedo
+                key={torpedo.id}
+                position={torpedo.position}
+                targetPosition={torpedo.targetPosition}
+                onImpact={() => {
+                   onTorpedoImpact?.(torpedo.id);
+                   setExplosions(prev => [...prev, { id: Date.now().toString(), position: torpedo.targetPosition.clone() }]);
+                   setShakeIntensity(5); // Shake camera on impact
+                }}
+             />
+          ))}
 
           {/* Orbit Lines */}
           <OrbitLines 
@@ -950,40 +1052,22 @@ function SceneContent({
                   return null;
                 })}
 
-                {/* Destination Planets with destruction system */}
+                {/* Destination Planets */}
                 {DESTINATIONS.filter(dest => dest.type !== 'station').map((dest) => {
-                  const health = planetHealth.getPlanet(dest.id);
-                  if (!health) return null;
-                  
-                  const isTargeted = weapons.state.targetId === dest.id;
-                  
                   return (
-                    <group key={dest.id}>
-                      {/* Destructible planet */}
-                      <DestructiblePlanet 
+                    <group key={dest.id} position={dest.position.toArray()}>
+                      {/* Detailed planet */}
+                      <DetailedPlanet 
                         destination={dest} 
-                        healthState={health}
-                        isTargeted={isTargeted}
                         sunDirection={sunDir}
+                        lodLevel="high"
                       />
-                      
-                      {/* Explosion effect */}
-                      {health.damageState === 'exploding' && (
-                        <PlanetExplosion
-                          position={dest.position}
-                          radius={dest.radius}
-                          progress={health.explosionProgress}
-                        />
-                      )}
-                      
-                      {/* Debris field */}
-                      <DebrisField
-                        position={dest.position}
-                        radius={dest.radius}
-                        isActive={health.damageState === 'debris'}
-                        fadeProgress={health.damageState === 'debris' ? 0 : 1}
-                        shipPosition={shipPositionRef.current}
-                        onShipCollision={handleDebrisCollision}
+                      {/* Destination marker/beacon */}
+                      <pointLight
+                        position={[0, dest.radius + 5, 0]}
+                        color={0x44ff88}
+                        intensity={20}
+                        distance={50}
                       />
                     </group>
                   );
@@ -998,6 +1082,7 @@ function SceneContent({
               onSelectComponent={onSelectComponent}
               hoveredComponent={hoveredComponent}
               onHoverComponent={onHoverComponent}
+              warpState={currentWarpState}
             />
             
             {/* Warp Visual Effects - attached to ship so they follow it */}
@@ -1007,39 +1092,21 @@ function SceneContent({
             />
           </group>
 
-          {/* Phaser beam */}
-          {weapons.state.phaserFiring && weapons.state.targetPosition && (
-            <PhaserBeam
-              startPosition={getPhaserOrigin()}
-              endPosition={weapons.state.targetPosition}
-              intensity={weapons.state.phaserCharge / 100}
-              active={true}
-            />
-          )}
-
-          {/* Photon torpedoes */}
-          <PhotonTorpedoes
-            torpedoes={weapons.state.activeTorpedoes}
-          />
-        </>
-      )}
-
-      {/* Flight and Warp Controller */}
+          {/* Flight and Warp Controller */}
       {flightEnabled && (
         <FlightWarpController 
           shipRef={shipRef}
           onFlightStateUpdate={onFlightStateUpdate}
           onWarpStateUpdate={handleWarpStateUpdate}
-          enabled={flightEnabled && !isBridgeMode}
+          enabled={flightEnabled}
           selectedDestination={selectedDestination}
           warpLevel={warpLevel}
           audioEnabled={audioEnabled}
-          weaponsHook={weapons}
         />
       )}
 
       {/* Post-processing effects */}
-      <PostProcessing cinematicMode={currentWarpState === 'cruising' || isBridgeMode} qualitySettings={qualitySettings} />
+      <PostProcessing cinematicMode={currentWarpState === 'cruising'} qualitySettings={qualitySettings} />
     </>
   );
 }
@@ -1050,22 +1117,22 @@ export function Scene({
   onHoverComponent,
   onFlightStateUpdate,
   onWarpStateUpdate,
-  onWeaponsStateUpdate,
   onShipSystemsUpdate,
+  onScannerUpdate,
   onPlanetDestroyed,
   onPlanetClick,
   flightEnabled = true,
   cameraMode = 'flight',
   isOrbitEnabled = false,
-  isBridgeMode = false,
   selectedDestination,
   warpLevel = 1,
   audioEnabled = true,
-  phaserFiring = false,
-  torpedoFired = false,
-  targetNext = false,
   showOrbitLines = false,
   qualitySettings,
+  torpedoes,
+  enemies,
+  onTorpedoImpact,
+  onUpdateWeapons,
 }: SceneProps) {
   return (
     <div className="fixed inset-0">
@@ -1090,22 +1157,22 @@ export function Scene({
             onHoverComponent={onHoverComponent}
             onFlightStateUpdate={onFlightStateUpdate}
             onWarpStateUpdate={onWarpStateUpdate}
-            onWeaponsStateUpdate={onWeaponsStateUpdate}
             onShipSystemsUpdate={onShipSystemsUpdate}
+            onScannerUpdate={onScannerUpdate}
             onPlanetDestroyed={onPlanetDestroyed}
             onPlanetClick={onPlanetClick}
             flightEnabled={flightEnabled}
             cameraMode={cameraMode}
             isOrbitEnabled={isOrbitEnabled}
-            isBridgeMode={isBridgeMode}
             selectedDestination={selectedDestination}
             warpLevel={warpLevel}
             audioEnabled={audioEnabled}
-            phaserFiring={phaserFiring}
-            torpedoFired={torpedoFired}
-            targetNext={targetNext}
             showOrbitLines={showOrbitLines}
             qualitySettings={qualitySettings}
+            torpedoes={torpedoes}
+            enemies={enemies}
+            onTorpedoImpact={onTorpedoImpact}
+            onUpdateWeapons={onUpdateWeapons}
           />
         </Suspense>
       </Canvas>

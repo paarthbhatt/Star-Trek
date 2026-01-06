@@ -1,10 +1,9 @@
 // Types for USS Enterprise NCC-1701 Cinematic Experience
 
-export type ShipComponent = 
+export type ShipComponent =
   | 'saucer'
   | 'engineering'
   | 'nacelles'
-  | 'bridge'
   | 'deflector'
   | 'mission';
 

@@ -62,14 +62,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     action: 'warp_set',
   },
   {
-    id: 'weapons',
-    title: 'Weapons Systems',
-    description: 'Press N to target an object. Hold F to fire phasers, press G to launch photon torpedoes.',
-    hint: 'Press N to select a target',
-    highlightKeys: ['N', 'F', 'G'],
-    action: 'target',
-  },
-  {
     id: 'complete',
     title: 'Tutorial Complete',
     description: 'You\'re ready to explore the galaxy! Remember: press ? for a full controls reference, and access Settings via the gear icon.',
@@ -138,9 +130,6 @@ export function Tutorial({ isActive, onComplete, onSkip }: TutorialProps) {
             break;
           case 'warp_set':
             if (/^[1-9]$/.test(key)) actionCompleted = true;
-            break;
-          case 'target':
-            if (key === 'n') actionCompleted = true;
             break;
         }
 

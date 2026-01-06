@@ -25,7 +25,7 @@ export interface GameState {
   lastSaveTime: number;
 }
 
-interface GameStateActions {
+ interface GameStateActions {
   saveGame: (currentData: Partial<GameState>) => void;
   loadGame: () => Partial<GameState> | null;
   resetGame: () => void;
@@ -79,7 +79,7 @@ export const useGameState = create<GameState & GameStateActions>()(
             missionLog: [],
             lastSaveTime: Date.now(),
         });
-      }
+      },
     }),
     {
       name: 'startrek-save-data', // name of the item in the storage (must be unique)

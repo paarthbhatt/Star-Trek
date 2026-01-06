@@ -2,6 +2,8 @@
 
 import { motion } from 'framer-motion';
 import { FlightState } from '@/hooks/useFlightControls';
+import { LCARS_COLORS } from './lcars/LCARSColors';
+import { useEffect, useState } from 'react';
 
 interface HelmConsoleProps {
   flightState: FlightState | null;
@@ -14,143 +16,204 @@ export function HelmConsole({ flightState, warpLevel, destination, eta }: HelmCo
   const impulsePercent = flightState?.impulsePercent ?? 0;
   const speed = flightState?.speed ?? 0;
   const isWarping = flightState?.isWarping ?? false;
+  
+  // Dynamic UI State
+  const [activeColor, setActiveColor] = useState<string>(LCARS_COLORS.orange);
+  
+  useEffect(() => {
+    if (isWarping) {
+      setActiveColor(LCARS_COLORS.warp);
+    } else if (impulsePercent > 0) {
+      setActiveColor(LCARS_COLORS.impulse);
+    } else {
+      setActiveColor(LCARS_COLORS.orange);
+    }
+  }, [isWarping, impulsePercent]);
+
+  // Shake effect variants
+  const containerVariants = {
+    idle: { x: '-50%', y: 0 },
+    warping: { 
+      x: ['-50%', '-50.2%', '-49.8%', '-50%'],
+      y: [0, 1, -1, 0],
+      transition: { repeat: Infinity, duration: 0.1 } 
+    }
+  };
 
   return (
     <motion.div
-      initial={{ y: 100, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.5, delay: 0.3 }}
-      className="fixed bottom-0 left-1/2 -translate-x-1/2 mb-4 z-50"
+      initial={{ y: 100, opacity: 0, x: '-50%' }}
+      animate={isWarping ? "warping" : "idle"}
+      variants={containerVariants}
+      className="fixed bottom-6 left-1/2 z-40 flex items-end pointer-events-none select-none"
     >
-      <div className="flex items-end gap-3">
-        {/* Speed/Impulse Display */}
-        <div className="bg-black/60 backdrop-blur-sm border border-cyan-500/30 rounded-lg p-3 min-w-[180px]">
-          <div className="text-cyan-400/70 text-xs font-mono uppercase tracking-wider mb-1">
-            {isWarping ? 'WARP SPEED' : 'IMPULSE POWER'}
-          </div>
-          
-          {/* Speed bar */}
-          <div className="h-2 bg-gray-800 rounded-full overflow-hidden mb-2">
-            <motion.div
-              className={`h-full ${isWarping ? 'bg-gradient-to-r from-blue-500 to-purple-500' : 'bg-gradient-to-r from-orange-500 to-yellow-400'}`}
-              initial={{ width: 0 }}
-              animate={{ width: `${isWarping ? (warpLevel / 9) * 100 : impulsePercent}%` }}
-              transition={{ duration: 0.1 }}
-            />
-          </div>
-          
-          <div className="flex justify-between items-baseline">
-            <span className={`text-2xl font-bold font-mono ${isWarping ? 'text-purple-400' : 'text-orange-400'}`}>
-              {isWarping ? `WARP ${warpLevel}` : `${impulsePercent.toFixed(0)}%`}
-            </span>
-            <span className="text-gray-400 text-xs font-mono">
-              {speed.toFixed(1)} u/s
-            </span>
-          </div>
-        </div>
-
-        {/* Main Helm Display */}
-        <div className="bg-black/70 backdrop-blur-sm border border-cyan-500/40 rounded-lg p-4 min-w-[280px]">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-cyan-300 font-bold tracking-wider text-sm">HELM CONTROL</div>
-            <div className={`w-2 h-2 rounded-full ${impulsePercent > 0 || isWarping ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`} />
-          </div>
-
-          {/* Destination */}
-          <div className="mb-2">
-            <span className="text-gray-500 text-xs font-mono">DESTINATION: </span>
-            <span className="text-cyan-400 font-mono text-sm">
-              {destination || 'NOT SET'}
-            </span>
-          </div>
-
-          {/* ETA */}
-          {destination && eta && (
-            <div>
-              <span className="text-gray-500 text-xs font-mono">ETA: </span>
-              <span className="text-yellow-400 font-mono text-sm">{eta}</span>
+        {/* Left Elbow Connector */}
+        <div className="flex flex-col items-end mr-1 pb-1">
+            <div className="h-4 w-16 rounded-tl-full bg-orange-500/80 mb-1"></div>
+            <div className="h-24 w-8 rounded-l-full bg-blue-400/60 relative overflow-hidden">
+                <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
             </div>
-          )}
+        </div>
 
-          {/* Controls hint */}
-          <div className="mt-3 pt-2 border-t border-cyan-500/20">
-            <div className="text-gray-500 text-[10px] font-mono flex gap-3 flex-wrap">
-              <span><kbd className="text-cyan-500">WASD</kbd> Move</span>
-              <span><kbd className="text-cyan-500">QE</kbd> Roll</span>
-              <span><kbd className="text-cyan-500">SPACE</kbd> Warp</span>
-              <span><kbd className="text-cyan-500">X</kbd> Stop</span>
+        {/* MAIN CONSOLE CONTAINER */}
+        <div className="glass-holographic bg-black/80 border border-white/10 rounded-tr-2xl rounded-tl-2xl p-1 flex items-end gap-1 shadow-[0_0_30px_rgba(0,0,0,0.5)] backdrop-blur-md">
+            
+            {/* 1. POWER / SPEED COLUMN */}
+            <div className="w-64 bg-black/40 rounded-tl-xl rounded-bl-lg border border-white/5 p-3 flex flex-col gap-2">
+                <div className="flex justify-between items-center border-b border-white/10 pb-1 mb-1">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-orange-400">Propulsion</span>
+                    <span className={`text-[10px] font-mono ${isWarping ? 'text-blue-300 animate-pulse' : 'text-gray-500'}`}>
+                        {isWarping ? 'WARP FIELD ACTIVE' : 'IMPULSE DRIVE'}
+                    </span>
+                </div>
+
+                {/* Speed Bar Graph */}
+                <div className="h-12 flex gap-1 items-end">
+                    {[...Array(10)].map((_, i) => {
+                        const threshold = (i + 1) * 10;
+                        const currentVal = isWarping ? (warpLevel / 9) * 100 : impulsePercent;
+                        const active = currentVal >= threshold;
+                        
+                        return (
+                            <div key={i} className="flex-1 flex flex-col gap-0.5 h-full justify-end">
+                                <div 
+                                    className={`w-full transition-all duration-300 rounded-sm ${active ? 'opacity-100 shadow-[0_0_5px_currentColor]' : 'opacity-20'}`}
+                                    style={{ 
+                                        backgroundColor: active ? activeColor : '#fff',
+                                        height: active ? '100%' : '20%'
+                                    }}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div className="flex justify-between items-baseline mt-1">
+                    <span className="text-4xl font-mono font-bold leading-none" style={{ color: activeColor }}>
+                        {isWarping ? warpLevel.toFixed(1) : Math.round(impulsePercent)}
+                        <span className="text-sm ml-1 opacity-50">{isWarping ? 'WF' : '%'}</span>
+                    </span>
+                    <div className="text-right">
+                        <div className="text-[9px] uppercase text-gray-400 tracking-wider">Velocity</div>
+                        <div className="text-xs font-mono text-white">{speed.toFixed(0)} <span className="text-gray-500">km/s</span></div>
+                    </div>
+                </div>
             </div>
-          </div>
+
+            {/* 2. NAVIGATION / HEADING CENTER */}
+            <div className="w-80 h-32 bg-black/40 border border-white/5 p-3 flex flex-col relative overflow-hidden">
+                {/* Scanline overlay */}
+                <div className="absolute inset-0 bg-[url('/scanlines.png')] opacity-10 pointer-events-none" />
+                
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-blue-400">Navigation</span>
+                    {destination && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_5px_#22c55e]" />}
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center items-center text-center">
+                    {destination ? (
+                        <>
+                            <div className="text-[10px] uppercase tracking-[0.3em] text-gray-400 mb-1">Current Heading</div>
+                            <div className="text-xl font-bold uppercase text-white tracking-widest text-glow-blue mb-2 truncate max-w-full px-2">
+                                {destination}
+                            </div>
+                            <div className="flex items-center gap-4 text-xs font-mono">
+                                <div className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/30">
+                                    ETA: {eta || '--:--'}
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="text-white/20 font-mono text-sm tracking-widest uppercase">
+                            - Station Keeping -
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* 3. WARP CONTROL INDICATORS */}
+            <div className="w-40 bg-black/40 rounded-tr-xl rounded-br-lg border border-white/5 p-3 flex flex-col gap-2">
+                <div className="text-[10px] uppercase font-bold tracking-widest text-purple-400 text-right border-b border-white/10 pb-1 mb-1">
+                    Warp Matrix
+                </div>
+                
+                <div className="grid grid-cols-3 gap-1">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((level) => (
+                        <div 
+                            key={level}
+                            className={`
+                                h-6 flex items-center justify-center text-[10px] font-bold font-mono rounded-sm transition-all duration-300
+                                ${warpLevel === level 
+                                    ? 'bg-purple-500 text-black shadow-[0_0_10px_#a855f7]' 
+                                    : 'bg-purple-900/20 text-purple-500/50 border border-purple-500/20'}
+                            `}
+                        >
+                            {level}
+                        </div>
+                    ))}
+                </div>
+                <div className="mt-auto text-[9px] text-right text-gray-500 font-mono">
+                    MAT-IND-44
+                </div>
+            </div>
+
         </div>
 
-        {/* Warp Level Selector */}
-        <div className="bg-black/60 backdrop-blur-sm border border-cyan-500/30 rounded-lg p-3">
-          <div className="text-cyan-400/70 text-xs font-mono uppercase tracking-wider mb-2">
-            WARP FACTOR
-          </div>
-          <div className="grid grid-cols-3 gap-1">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((level) => (
-              <div
-                key={level}
-                className={`w-7 h-7 flex items-center justify-center rounded text-xs font-bold font-mono transition-all
-                  ${warpLevel === level 
-                    ? 'bg-purple-600 text-white' 
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                  }`}
-              >
-                {level}
-              </div>
-            ))}
-          </div>
-          <div className="text-gray-500 text-[10px] font-mono mt-2 text-center">
-            Press 1-9 to select
-          </div>
+        {/* Right Elbow Connector */}
+        <div className="flex flex-col items-start ml-1 pb-1">
+            <div className="h-4 w-16 rounded-tr-full bg-red-500/80 mb-1"></div>
+            <div className="h-24 w-8 rounded-r-full bg-pink-400/60"></div>
         </div>
-      </div>
+
     </motion.div>
   );
 }
 
-// Controls overlay showing WASD keys
+// Controls overlay showing WASD keys - Modernized
 export function ControlsOverlay({ visible }: { visible: boolean }) {
   if (!visible) return null;
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed bottom-32 left-1/2 -translate-x-1/2 pointer-events-none z-40"
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="fixed bottom-40 right-10 pointer-events-none z-30"
     >
-      <div className="bg-black/50 backdrop-blur-sm rounded-lg p-4 border border-cyan-500/20">
-        <div className="grid grid-cols-3 gap-1 mb-2">
-          <div />
-          <Key label="W" subLabel="Forward" />
-          <div />
-          <Key label="A" subLabel="Left" />
-          <Key label="S" subLabel="Back" />
-          <Key label="D" subLabel="Right" />
+      <div className="glass-holographic p-4 rounded-xl border-l-4 border-b-0 border-orange-500/50 bg-black/60 backdrop-blur-sm">
+        <div className="flex justify-between items-center mb-3 border-b border-white/10 pb-1">
+            <div className="text-[10px] uppercase font-bold tracking-[0.2em] text-orange-400">
+                Manual Override
+            </div>
         </div>
-        <div className="flex justify-center gap-1">
-          <Key label="Q" subLabel="Roll L" small />
-          <Key label="E" subLabel="Roll R" small />
-          <Key label="SPACE" subLabel="Warp" wide />
-          <Key label="X" subLabel="Stop" small />
+        
+        <div className="grid grid-cols-3 gap-1 mb-3">
+          <div />
+          <Key label="W" active />
+          <div />
+          <Key label="A" active />
+          <Key label="S" active />
+          <Key label="D" active />
+        </div>
+        <div className="flex justify-center gap-2 border-t border-white/10 pt-2">
+          <Key label="SPACE" wide labelSmall="WARP" />
+          <Key label="X" labelSmall="STOP" />
         </div>
       </div>
     </motion.div>
   );
 }
 
-function Key({ label, subLabel, small, wide }: { label: string; subLabel?: string; small?: boolean; wide?: boolean }) {
+function Key({ label, labelSmall, wide, active }: { label: string; labelSmall?: string; wide?: boolean; active?: boolean }) {
   return (
     <div className={`
       flex flex-col items-center justify-center 
-      bg-gray-800/80 border border-gray-600 rounded
-      ${wide ? 'px-4 py-1' : small ? 'w-10 h-10' : 'w-12 h-12'}
+      border rounded transition-all duration-300
+      ${wide ? 'w-auto px-4 h-10' : 'w-10 h-10'}
+      ${active ? 'bg-white/10 border-white/20' : 'bg-black/40 border-white/5'}
     `}>
-      <span className="text-white font-mono font-bold text-sm">{label}</span>
-      {subLabel && <span className="text-gray-400 text-[8px]">{subLabel}</span>}
+      <span className="text-white font-mono font-bold text-xs">{label}</span>
+      {labelSmall && <span className="text-[7px] text-orange-300 tracking-wider mt-0.5">{labelSmall}</span>}
     </div>
   );
 }

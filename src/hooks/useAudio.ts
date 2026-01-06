@@ -20,13 +20,21 @@ export type SoundType =
   | 'planetDamage'
   | 'planetExplode'
   | 'shieldHit'
-  | 'targetLock';
+  | 'targetLock'
+  | 'uiClick'     // New
+  | 'uiHover'     // New
+  | 'uiOpen'      // New
+  | 'uiClose'     // New
+  | 'ambienceRumble' // New - Gas Giants/Sun
+  | 'ambienceEthereal' // New - Earth/Water planets
+  | 'ambienceStatic'; // New - Stations/Radio
 
 interface AudioState {
   context: AudioContext | null;
   masterGain: GainNode | null;
   activeOscillators: Map<string, OscillatorNode[]>;
   activeGains: Map<string, GainNode>;
+  activeSources: Map<string, AudioBufferSourceNode>; // Track noise sources
 }
 
 export function useAudio(enabled: boolean = true) {
@@ -35,6 +43,7 @@ export function useAudio(enabled: boolean = true) {
     masterGain: null,
     activeOscillators: new Map(),
     activeGains: new Map(),
+    activeSources: new Map(),
   });
 
   // Initialize audio context on first user interaction
@@ -53,11 +62,14 @@ export function useAudio(enabled: boolean = true) {
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      const { context, activeOscillators } = stateRef.current;
+      const { context, activeOscillators, activeSources } = stateRef.current;
       activeOscillators.forEach((oscs) => {
         oscs.forEach(osc => {
           try { osc.stop(); } catch (e) {}
         });
+      });
+      activeSources.forEach((source) => {
+        try { source.stop(); } catch (e) {}
       });
       if (context) {
         context.close();
@@ -137,9 +149,10 @@ export function useAudio(enabled: boolean = true) {
 
   // Stop a looping sound
   const stopSound = useCallback((id: string) => {
-    const { activeOscillators, activeGains, context } = stateRef.current;
+    const { activeOscillators, activeGains, activeSources, context } = stateRef.current;
     
     const oscs = activeOscillators.get(id);
+    const source = activeSources.get(id);
     const gain = activeGains.get(id);
     
     if (gain && context) {
@@ -151,21 +164,25 @@ export function useAudio(enabled: boolean = true) {
       } catch (e) {}
     }
     
-    if (oscs) {
-      // Stop oscillators after short fade
-      setTimeout(() => {
+    // Stop oscillators and buffer sources after short fade
+    setTimeout(() => {
+      if (oscs) {
         oscs.forEach(osc => {
           try { osc.stop(); } catch (e) {}
         });
         activeOscillators.delete(id);
-        activeGains.delete(id);
-      }, 250);
-    }
+      }
+      if (source) {
+        try { source.stop(); } catch (e) {}
+        activeSources.delete(id);
+      }
+      activeGains.delete(id);
+    }, 250);
   }, []);
 
   // Stop all sounds (for cleanup)
   const stopAllSounds = useCallback(() => {
-    const { activeOscillators, activeGains, context } = stateRef.current;
+    const { activeOscillators, activeGains, activeSources, context } = stateRef.current;
     
     // Stop all tracked oscillators
     for (const [id, oscs] of activeOscillators) {
@@ -183,8 +200,17 @@ export function useAudio(enabled: boolean = true) {
         });
       }, 150);
     }
+
+    // Stop all tracked sources (noise buffers)
+    for (const [id, source] of activeSources) {
+       // Gain handling is shared if ID matches, already handled above
+       setTimeout(() => {
+         try { source.stop(); } catch (e) {}
+       }, 150);
+    }
     
     activeOscillators.clear();
+    activeSources.clear();
     activeGains.clear();
   }, []);
 
@@ -245,28 +271,54 @@ export function useAudio(enabled: boolean = true) {
   // Engine impulse sound - higher pitch with more harmonics
   const playEngineImpulse = useCallback((power: number = 0.5) => {
     initAudio();
-    const { context, masterGain } = stateRef.current;
+    const { context, masterGain, activeOscillators, activeGains } = stateRef.current;
     if (!context || !masterGain || !enabled) return;
 
+    // Check if engine is already running
+    if (activeOscillators.has('engine') && activeGains.has('engine')) {
+      const oscs = activeOscillators.get('engine');
+      const gain = activeGains.get('engine');
+      
+      if (oscs && oscs.length >= 3 && gain) {
+        // Update existing sound
+        const baseFreq = 55 + power * 25;
+        
+        // Smoothly ramp to new values to prevent clicking
+        const time = context.currentTime;
+        const rampTime = 0.1; // 100ms smoothing
+        
+        // Update gain/volume
+        gain.gain.setTargetAtTime(0.06 + power * 0.04, time, rampTime);
+        
+        // Update frequencies
+        oscs[0].frequency.setTargetAtTime(baseFreq, time, rampTime);
+        oscs[1].frequency.setTargetAtTime(baseFreq * 0.5, time, rampTime);
+        oscs[2].frequency.setTargetAtTime(0.8 + power * 0.5, time, rampTime);
+        
+        return; // Done updating
+      }
+    }
+
+    // If not running, create new
     stopSound('engine');
 
     const oscs: OscillatorNode[] = [];
     const gain = context.createGain();
-    gain.gain.value = 0.06 + power * 0.04; // Reduced overall volume
+    gain.gain.value = 0.06 + power * 0.04;
     gain.connect(masterGain);
 
     // Base frequency - increases with power
-    const baseFreq = 55 + power * 25; // Lower base frequency, less variation
+    const baseFreq = 55 + power * 25;
     
     const osc1 = context.createOscillator();
-    osc1.type = 'sine'; // Changed from sawtooth to sine - smoother, less harsh
+    osc1.type = 'sine';
     osc1.frequency.value = baseFreq;
     
     // Filter to smooth the sound
     const filter = context.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 150 + power * 100; // Lower cutoff to remove harshness
-    filter.Q.value = 0.5; // Lower Q for smoother response
+    filter.frequency.value = 150 + power * 100;
+    filter.Q.value = 0.5;
     
     osc1.connect(filter);
     filter.connect(gain);
@@ -276,7 +328,7 @@ export function useAudio(enabled: boolean = true) {
     // Second oscillator for sub-bass rumble
     const osc2 = context.createOscillator();
     osc2.type = 'sine';
-    osc2.frequency.value = baseFreq * 0.5; // Sub-harmonic instead of harmonic
+    osc2.frequency.value = baseFreq * 0.5;
     const gain2 = context.createGain();
     gain2.gain.value = 0.03;
     osc2.connect(gain2);
@@ -284,20 +336,118 @@ export function useAudio(enabled: boolean = true) {
     osc2.start();
     oscs.push(osc2);
 
-    // Very subtle pulsing LFO - amplitude modulation only, NOT frequency
+    // Very subtle pulsing LFO
     const lfo = context.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.8 + power * 0.5; // Slow pulse
+    lfo.frequency.value = 0.8 + power * 0.5;
     const lfoGain = context.createGain();
-    lfoGain.gain.value = 0.01; // Very subtle amplitude modulation
+    lfoGain.gain.value = 0.01;
     lfo.connect(lfoGain);
-    lfoGain.connect(gain.gain); // Connect to gain, not frequency
+    lfoGain.connect(gain.gain);
     lfo.start();
     oscs.push(lfo);
 
     stateRef.current.activeOscillators.set('engine', oscs);
     stateRef.current.activeGains.set('engine', gain);
   }, [initAudio, stopSound, enabled]);
+
+  // Bridge ambience - steady hum + random beeps
+  const playBridgeAmbience = useCallback(() => {
+    initAudio();
+    const { context, masterGain, activeOscillators } = stateRef.current;
+    if (!context || !masterGain || !enabled) return;
+
+    if (activeOscillators.has('bridge')) return; // Already playing
+
+    const oscs: OscillatorNode[] = [];
+    const gain = context.createGain();
+    gain.gain.value = 0.08; // Increased background volume slightly
+    gain.connect(masterGain);
+
+    // Deep deck hum (Star Trek TNG style) - The "Room Tone"
+    const hum = context.createOscillator();
+    hum.type = 'sine';
+    hum.frequency.value = 58; // Low C# approx - classic TNG rumble note
+    
+    // Add multiple harmonics for that "air conditioner" sound
+    const hum2 = context.createOscillator();
+    hum2.type = 'triangle'; // Richer tone than sine
+    hum2.frequency.value = 110; 
+    const hum2Gain = context.createGain();
+    hum2Gain.gain.value = 0.15;
+    hum2.connect(hum2Gain);
+    hum2Gain.connect(gain);
+
+    // Pink noise for air texture (ventilation)
+    const bufferSize = context.sampleRate * 2;
+    const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+    const data = buffer.getChannelData(0);
+    let lastOut = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      data[i] = (lastOut + (0.02 * white)) / 1.02;
+      lastOut = data[i];
+      data[i] *= 3.5;
+    }
+
+    const noise = context.createBufferSource();
+    noise.buffer = buffer;
+    noise.loop = true;
+    const noiseFilter = context.createBiquadFilter();
+    noiseFilter.type = 'lowpass';
+    noiseFilter.frequency.value = 120; // Muffled air
+    const noiseGain = context.createGain();
+    noiseGain.gain.value = 0.25; // Prominent air hiss
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(gain);
+    noise.start();
+
+    // Connect hums
+    hum.connect(gain);
+    hum.start();
+    hum2.start();
+
+    oscs.push(hum);
+    oscs.push(hum2);
+    // Cast to any to store in oscillator array
+    oscs.push(noise as any);
+
+    stateRef.current.activeOscillators.set('bridge', oscs);
+    stateRef.current.activeGains.set('bridge', gain);
+
+    // Schedule random beeps (simulated computer activity - LCARS style chirps)
+    const scheduleBeep = () => {
+      // Check if bridge sound is still active
+      if (!stateRef.current.activeOscillators.has('bridge')) return;
+      
+      if (Math.random() > 0.6) {
+        // LCARS style: High-High or High-Low chirps
+        // Frequencies often around 1000Hz - 2500Hz
+        const baseFreq = 1200 + Math.random() * 1000;
+        
+        // Short duration clean tones
+        createTone(baseFreq, 'sine', 0.03, 0.08);
+        
+        // Sometimes double chirp
+        if (Math.random() > 0.4) {
+           const nextFreq = Math.random() > 0.5 ? baseFreq * 1.5 : baseFreq * 0.8;
+           setTimeout(() => createTone(nextFreq, 'sine', 0.03, 0.08), 120);
+        }
+        
+        // Rare: Triple chirp (processing sound)
+        if (Math.random() > 0.85) {
+            setTimeout(() => createTone(baseFreq * 1.2, 'sine', 0.03, 0.06), 240);
+        }
+      }
+      
+      // Schedule next event - keep it somewhat busy but not annoying
+      setTimeout(scheduleBeep, 3000 + Math.random() * 6000);
+    };
+    scheduleBeep();
+
+  }, [initAudio, createTone, enabled]);
 
   // Warp charge sound - rising tone
   const playWarpCharge = useCallback(() => {
@@ -478,6 +628,46 @@ export function useAudio(enabled: boolean = true) {
     setTimeout(() => createTone(440, 'square', 0.08, 0.15), 400);
   }, [initAudio, createTone, enabled]);
 
+  // NEW UI SOUNDS
+  // ----------------------------------------------------
+
+  const playUIClick = useCallback(() => {
+    initAudio();
+    if (!enabled) return;
+    // High pitched short chirp
+    createTone(1200, 'sine', 0.08, 0.05);
+  }, [initAudio, createTone, enabled]);
+
+  const playUIHover = useCallback(() => {
+    initAudio();
+    if (!enabled) return;
+    // Very soft, high tick
+    createTone(800, 'triangle', 0.02, 0.03);
+  }, [initAudio, createTone, enabled]);
+
+  const playUIOpen = useCallback(() => {
+    initAudio();
+    const { context } = stateRef.current;
+    if (!context || !enabled) return;
+    
+    // Ascending harmonic sweep
+    createTone(400, 'sine', 0.05, 0.1);
+    setTimeout(() => createTone(600, 'sine', 0.05, 0.1), 50);
+    setTimeout(() => createTone(800, 'sine', 0.05, 0.1), 100);
+  }, [initAudio, createTone, enabled]);
+
+  const playUIClose = useCallback(() => {
+    initAudio();
+    const { context } = stateRef.current;
+    if (!context || !enabled) return;
+    
+    // Descending harmonic sweep
+    createTone(800, 'sine', 0.05, 0.1);
+    setTimeout(() => createTone(600, 'sine', 0.05, 0.1), 50);
+    setTimeout(() => createTone(400, 'sine', 0.05, 0.1), 100);
+  }, [initAudio, createTone, enabled]);
+
+
   // Viewscreen activation sound
   const playViewscreen = useCallback(() => {
     initAudio();
@@ -494,7 +684,7 @@ export function useAudio(enabled: boolean = true) {
     }, 100);
   }, [initAudio, createNoise, createTone, enabled]);
 
-  // Phaser fire sound - sustained high oscillation (500-900Hz)
+  // Phaser fire sound - Kelvin pulse style (rapid energetic pulses)
   const playPhaserFire = useCallback(() => {
     initAudio();
     const { context, masterGain } = stateRef.current;
@@ -505,65 +695,58 @@ export function useAudio(enabled: boolean = true) {
 
     const oscs: OscillatorNode[] = [];
     const gain = context.createGain();
-    gain.gain.value = 0.18;
+    gain.gain.value = 0.22;
     gain.connect(masterGain);
 
-    // Primary phaser oscillator - high frequency
+    // Primary phaser oscillator - sharp pulse
     const osc1 = context.createOscillator();
-    osc1.type = 'sine';
-    osc1.frequency.value = 700;
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = 350; // Lower fundamental for 'punch'
     osc1.connect(gain);
     osc1.start();
     oscs.push(osc1);
 
-    // Secondary oscillator for richness
+    // High harmonic whine (energy buildup)
     const osc2 = context.createOscillator();
     osc2.type = 'sine';
-    osc2.frequency.value = 850;
+    osc2.frequency.value = 1200;
     const gain2 = context.createGain();
-    gain2.gain.value = 0.08;
+    gain2.gain.value = 0.1;
     osc2.connect(gain2);
     gain2.connect(gain);
     osc2.start();
     oscs.push(osc2);
 
-    // High harmonic for that phaser "edge"
-    const osc3 = context.createOscillator();
-    osc3.type = 'sawtooth';
-    osc3.frequency.value = 1400;
-    const gain3 = context.createGain();
-    gain3.gain.value = 0.02;
-    const filter = context.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 2000;
-    osc3.connect(filter);
-    filter.connect(gain3);
-    gain3.connect(gain);
-    osc3.start();
-    oscs.push(osc3);
+    // Aggressive Amplitude Modulation for the "Pulse" effect
+    const pulseLfo = context.createOscillator();
+    pulseLfo.type = 'square'; // Hard on/off sound
+    pulseLfo.frequency.value = 15; // 15 pulses per second
+    
+    // Smooth the square wave slightly to avoid clicking
+    const lfoFilter = context.createBiquadFilter();
+    lfoFilter.type = 'lowpass';
+    lfoFilter.frequency.value = 100;
 
-    // Frequency modulation LFO for wavering effect
-    const lfo = context.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.value = 15;
-    const lfoGain = context.createGain();
-    lfoGain.gain.value = 50;
-    lfo.connect(lfoGain);
-    lfoGain.connect(osc1.frequency);
-    lfoGain.connect(osc2.frequency);
-    lfo.start();
-    oscs.push(lfo);
+    const pulseGain = context.createGain();
+    pulseGain.gain.value = 0.8; // Depth of pulsing
+    
+    pulseLfo.connect(lfoFilter);
+    lfoFilter.connect(pulseGain);
+    pulseGain.connect(gain.gain);
+    pulseLfo.start();
+    oscs.push(pulseLfo);
 
-    // Amplitude modulation for pulsing
-    const ampLfo = context.createOscillator();
-    ampLfo.type = 'sine';
-    ampLfo.frequency.value = 8;
-    const ampLfoGain = context.createGain();
-    ampLfoGain.gain.value = 0.03;
-    ampLfo.connect(ampLfoGain);
-    ampLfoGain.connect(gain.gain);
-    ampLfo.start();
-    oscs.push(ampLfo);
+    // Frequency modulation for the "Zew-Zew" pitch envelope on each pulse
+    const pitchLfo = context.createOscillator();
+    pitchLfo.type = 'sawtooth'; 
+    pitchLfo.frequency.value = 15; // Sync with pulse
+    const pitchGain = context.createGain();
+    pitchGain.gain.value = 200; // Pitch drop amount
+    
+    pitchLfo.connect(pitchGain);
+    pitchGain.connect(osc1.frequency);
+    pitchLfo.start();
+    oscs.push(pitchLfo);
 
     stateRef.current.activeOscillators.set('phaser', oscs);
     stateRef.current.activeGains.set('phaser', gain);
@@ -926,6 +1109,144 @@ export function useAudio(enabled: boolean = true) {
     }, 100);
   }, [initAudio, enabled]);
 
+  // Ambience - Deep Space Rumble (Gas Giant/Sun)
+  const playAmbienceRumble = useCallback(() => {
+    initAudio();
+    const { context, masterGain, activeOscillators } = stateRef.current;
+    if (!context || !masterGain || !enabled) return;
+
+    if (activeOscillators.has('ambience_rumble')) return;
+
+    const oscs: OscillatorNode[] = [];
+    const gain = context.createGain();
+    gain.gain.value = 0.15;
+    gain.connect(masterGain);
+
+    // Deep sub-bass drone
+    const osc1 = context.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = 35; 
+    osc1.connect(gain);
+    osc1.start();
+    oscs.push(osc1);
+
+    // Secondary drone
+    const osc2 = context.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.value = 42;
+    const gain2 = context.createGain();
+    gain2.gain.value = 0.05;
+    osc2.connect(gain2);
+    gain2.connect(gain);
+    osc2.start();
+    oscs.push(osc2);
+
+    // Add slow modulation for "breathing" effect
+    const lfo = context.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.05; // Very slow
+    const lfoGain = context.createGain();
+    lfoGain.gain.value = 0.02;
+    lfo.connect(lfoGain);
+    lfoGain.connect(gain.gain);
+    lfo.start();
+    oscs.push(lfo);
+
+    stateRef.current.activeOscillators.set('ambience_rumble', oscs);
+    stateRef.current.activeGains.set('ambience_rumble', gain);
+  }, [initAudio, enabled]);
+
+  // Ambience - Ethereal (Earth/Water)
+  const playAmbienceEthereal = useCallback(() => {
+    initAudio();
+    const { context, masterGain, activeOscillators } = stateRef.current;
+    if (!context || !masterGain || !enabled) return;
+
+    if (activeOscillators.has('ambience_ethereal')) return;
+
+    const oscs: OscillatorNode[] = [];
+    const gain = context.createGain();
+    gain.gain.value = 0.1;
+    gain.connect(masterGain);
+
+    // High shimmer
+    const osc1 = context.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.value = 440; 
+    const gain1 = context.createGain();
+    gain1.gain.value = 0.05;
+    osc1.connect(gain1);
+    gain1.connect(gain);
+    osc1.start();
+    oscs.push(osc1);
+
+    // Fifth harmony
+    const osc2 = context.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = 660;
+    const gain2 = context.createGain();
+    gain2.gain.value = 0.03;
+    osc2.connect(gain2);
+    gain2.connect(gain);
+    osc2.start();
+    oscs.push(osc2);
+
+    // Wind/Air noise
+    const noise = createNoise(0.02, undefined);
+    if(noise) {
+        // We need to track this noise source manually since it's not in our oscs array
+        // But for consistency let's add it to activeSources
+        stateRef.current.activeSources.set('ambience_ethereal_noise', noise.source);
+        noise.gain.connect(gain);
+    }
+
+    stateRef.current.activeOscillators.set('ambience_ethereal', oscs);
+    stateRef.current.activeGains.set('ambience_ethereal', gain);
+  }, [initAudio, createNoise, enabled]);
+
+  // Ambience - Static/Radio (Stations)
+  const playAmbienceStatic = useCallback(() => {
+    initAudio();
+    const { context, masterGain, activeOscillators } = stateRef.current;
+    if (!context || !masterGain || !enabled) return;
+    
+    // Check if already playing active source for static
+    if (stateRef.current.activeSources.has('ambience_static')) return;
+
+    const gain = context.createGain();
+    gain.gain.value = 0.08;
+    gain.connect(masterGain);
+
+    const noise = createNoise(0.08, undefined);
+    if(noise) {
+        stateRef.current.activeSources.set('ambience_static', noise.source);
+        // Add a bandpass filter for "radio" effect
+        const filter = context.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1000;
+        filter.Q.value = 1;
+        
+        noise.source.disconnect();
+        noise.source.connect(filter);
+        filter.connect(noise.gain);
+        noise.gain.connect(gain);
+        
+        stateRef.current.activeGains.set('ambience_static', gain);
+    }
+    
+    // Add random blips
+    const scheduleBlip = () => {
+        if (!stateRef.current.activeSources.has('ambience_static')) return;
+        
+        if (Math.random() > 0.7) {
+             createTone(2000 + Math.random() * 500, 'square', 0.02, 0.05);
+        }
+        setTimeout(scheduleBlip, 1000 + Math.random() * 2000);
+    }
+    scheduleBlip();
+
+  }, [initAudio, createNoise, createTone, enabled]);
+
   // Play sound by type
   const playSound = useCallback((type: SoundType, ...args: any[]) => {
     switch (type) {
@@ -938,6 +1259,10 @@ export function useAudio(enabled: boolean = true) {
       case 'uiBeep': playUIBeep(); break;
       case 'uiConfirm': playUIConfirm(); break;
       case 'uiAlert': playUIAlert(); break;
+      case 'uiClick': playUIClick(); break;
+      case 'uiHover': playUIHover(); break;
+      case 'uiOpen': playUIOpen(); break;
+      case 'uiClose': playUIClose(); break;
       case 'viewscreen': playViewscreen(); break;
       case 'phaserFire': playPhaserFire(); break;
       case 'phaserStop': playPhaserStop(); break;
@@ -947,12 +1272,16 @@ export function useAudio(enabled: boolean = true) {
       case 'planetExplode': playPlanetExplode(); break;
       case 'shieldHit': playShieldHit(); break;
       case 'targetLock': playTargetLock(); break;
+      case 'ambienceRumble': playAmbienceRumble(); break;
+      case 'ambienceEthereal': playAmbienceEthereal(); break;
+      case 'ambienceStatic': playAmbienceStatic(); break;
     }
   }, [playEngineIdle, playEngineImpulse, playWarpCharge, playWarpEngage, 
       playWarpCruise, playWarpDisengage, playUIBeep, playUIConfirm, 
-      playUIAlert, playViewscreen, playPhaserFire, playPhaserStop,
+      playUIAlert, playUIClick, playUIHover, playUIOpen, playUIClose, 
+      playViewscreen, playPhaserFire, playPhaserStop,
       playTorpedoLaunch, playTorpedoImpact, playPlanetDamage, playPlanetExplode,
-      playShieldHit, playTargetLock]);
+      playShieldHit, playTargetLock, playAmbienceRumble, playAmbienceEthereal, playAmbienceStatic]);
 
   // Set master volume
   const setVolume = useCallback((volume: number) => {
@@ -961,29 +1290,22 @@ export function useAudio(enabled: boolean = true) {
     }
   }, []);
 
+  // Update volume of a specific sound instance
+  const updateSoundVolume = useCallback((id: string, volume: number, rampTime: number = 0.1) => {
+    const { activeGains, context } = stateRef.current;
+    const gain = activeGains.get(id);
+    
+    if (gain && context) {
+      gain.gain.setTargetAtTime(volume, context.currentTime, rampTime);
+    }
+  }, []);
+
   return {
     initAudio,
     playSound,
-    playEngineIdle,
-    playEngineImpulse,
-    playWarpCharge,
-    playWarpEngage,
-    playWarpCruise,
-    playWarpDisengage,
-    playUIBeep,
-    playUIConfirm,
-    playUIAlert,
-    playViewscreen,
-    playPhaserFire,
-    playPhaserStop,
-    playTorpedoLaunch,
-    playTorpedoImpact,
-    playPlanetDamage,
-    playPlanetExplode,
-    playShieldHit,
-    playTargetLock,
     stopSound,
     stopAllSounds,
     setVolume,
+    updateSoundVolume,
   };
 }
